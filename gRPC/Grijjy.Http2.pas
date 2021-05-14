@@ -2,9 +2,9 @@ unit Grijjy.Http2;
 
 { Windows (and Linux?) Cross-platform HTTP/2 protocol
   support class using scalable client ánd server sockets.
-  
-  Modified version of the Grijjy.Http.pas unit to support gRPC 
-  and both client and server implementations. 
+
+  Modified version of the Grijjy.Http.pas unit to support gRPC
+  and both client and server implementations.
 
   Build on top of ngHttp2.dll:
   - https://nghttp2.org/documentation/nghttp2.h.html
@@ -20,6 +20,7 @@ interface
 {$DEFINE HTTP2}
 
 uses
+  Vcl.ExtCtrls,
   System.Classes,
   System.SysUtils,
   System.StrUtils,
@@ -273,6 +274,9 @@ type
     FConnected: TEvent;
     FPendingSendCount: Integer;
 
+    FTimerOut: TTimer;
+
+    procedure OnTimeouts(pSender: TObject);
     procedure OnSocketConnected;
     procedure OnSocketDisconnected;
 
@@ -280,11 +284,14 @@ type
     function OnFrameReceived(session: pnghttp2_session; session_data: TSessionContext;
       stream_data: TStreamRequest): Integer;
 
+    procedure HandleListNotify(Sender: TObject; const Item: TStreamRequest; Action: TCollectionNotification);
+
     function Send404Response(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
     function SubmitResponse(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
     function GetSSL: Boolean;
   protected
     FStreams: TDictionary<Integer, TStreamRequest>;
+    FUnaryStreams: TObjectList<TStreamRequest>;
     function GetTotalRequestSize: Integer;
     function GetTotalResponseSize: Integer;
     function IsRequestEOF: Boolean;
@@ -307,6 +314,7 @@ type
 
     property OnStreamFrameReceived: TStreamNotify read FOnStreamReceived write FOnStreamReceived;
     property SSL: Boolean read GetSSL;
+    property Session_http2: pnghttp2_session read FSession_http2;
   end;
 
   TListenThread = class(TThread)
@@ -365,11 +373,15 @@ type
     FRequestHeaders: TgoHttpHeaders2;
     FRequestProvider: nghttp2_data_provider;
     FPendingRequest: Boolean;
+    FIsUnary: Boolean;
 
     FResponseBuffer: TThreadSafeBuffer;
     FResponseHeaders: TgoHttpHeaders2;
     FResponseProvider: nghttp2_data_provider;
     FPendingResponse: Boolean;
+
+    FTimeRequestBegin: TDateTime;
+    FTimeout: UInt64;
 
     FOnFrameReceived: TStreamCallback;
     FRequestThread: IRequestThread;
@@ -395,6 +407,7 @@ type
     function  IsResponseClosed: Boolean;
     function  IsRequestClosed: Boolean;
     procedure CloseRequest;
+    procedure CloseRequestEx(ErrorCode: Integer);
     procedure CloseResponse;
 
     property RequestHeaders: TgoHttpHeaders2 read FRequestHeaders;
@@ -410,6 +423,9 @@ type
     property RequestThread: IRequestThread read FRequestThread write FRequestThread;
     property OnFrameReceived: TStreamCallback read FOnFrameReceived write FOnFrameReceived;
     property OnDestroy: TNotifyEvent read FOnDestroy write FOnDestroy;
+    property TimeRequestBegin: TDateTime read FTimeRequestBegin write FTimeRequestBegin;
+    property Timeout: UInt64 read FTimeout write FTimeout;
+    property IsUnary: Boolean read FIsUnary write FIsUnary;
   end;
 
 implementation
@@ -466,7 +482,7 @@ var
 begin
   Assert(Assigned(user_data));
   context := TObject(user_data) as TSessionContext;
-  Result  := context.nghttp2_on_frame_recv_callback(session, frame, user_data);
+  Result := context.nghttp2_on_frame_recv_callback(session, frame, user_data);
 end;
 
 function on_data_chunk_recv_callback(session: pnghttp2_session;
@@ -544,7 +560,6 @@ begin
     if not stream.FPendingRequest then
       data_flags^ := data_flags^ or NGHTTP2_DATA_FLAG_EOF
     else if Result = 0 then
-      //Result := -1;             //does not work with streaming?
       TInterlocked.Decrement(ctx.FPendingSendCount);
   end
   else
@@ -585,7 +600,6 @@ begin
   begin
     nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
     nghttp2_session_callbacks_set_on_begin_headers_callback(FCallbacks_http2, on_begin_headers_callback);
-
     nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
     nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
     nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
@@ -930,10 +944,14 @@ end;
 procedure TSessionContext.AddStream(aStream: TStreamRequest);
 begin
   System.TMonitor.Enter(FStreams);
+  System.TMonitor.Enter(FUnaryStreams);
   try
     FStreams.AddOrSetValue(aStream.StreamID, aStream);
+    if (aStream.IsUnary) and (aStream.Timeout > 0) and (not FUnaryStreams.Contains(aStream)) then
+      FUnaryStreams.Add(aStream);
   finally
     System.TMonitor.Exit(FStreams);
+    System.TMonitor.Exit(FUnaryStreams);
   end;
 end;
 
@@ -992,7 +1010,14 @@ begin
   FConnection.OnRecv := Self.OnSocketRecv;
   FCallbacks_http2 := aCallback;
 
+  FTimerOut := TTimer.Create(nil);
+  FTimerOut.Interval := 500;
+  FTimerOut.Enabled := False;
+  FTimerOut.OnTimer := OnTimeouts;
+
   FStreams := TObjectDictionary<Integer, TStreamRequest>.Create([doOwnsValues]);
+  FUnaryStreams := TObjectList<TStreamRequest>.Create(False);
+  FUnaryStreams.OnNotify := HandleListNotify;
 
   //init client or server session
   if IsServerContext then
@@ -1035,9 +1060,11 @@ end;
 
 destructor TSessionContext.Destroy;
 begin
+  FTimerOut.Free;
+  FStreams.Free;
+  FUnaryStreams.Free;
   nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
   Disconnect;
-  FStreams.Free;
   FConnected.Free;
   inherited;
 end;
@@ -1111,6 +1138,7 @@ begin
   end;
 end;
 
+
 function TSessionContext.nghttp2_on_data_chunk_recv_callback(session: pnghttp2_session;
   flags: uint8; stream_id: int32; const data: puint8; len: size_t;
   user_data: Pointer): Integer;
@@ -1140,6 +1168,7 @@ begin
   {$IFDEF LOGGING}
   OutputDebug(Format('stream closed: id = %d',[stream_id]));
   {$ENDIF}
+
   stream := GetOrCreateStream(stream_id);
 
   {$IFDEF LOGGING}
@@ -1263,7 +1292,7 @@ begin
   end;
 
   if not handled and IsServerContext then
-    Exit( Send404Response(session, stream_data) );
+    Exit(Send404Response(session, stream_data));
 end;
 
 function TSessionContext.Send404Response(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
@@ -1315,7 +1344,7 @@ begin
     begin
       Result := TStreamRequest.Create(Self, aStreamID);
       if aStreamID >= 0 then
-        FStreams.AddOrSetValue(aStreamID, Result);
+        AddStream(Result);
     end;
   finally
     System.TMonitor.Exit(FStreams);
@@ -1386,6 +1415,15 @@ begin
   end;
 end;
 
+procedure TSessionContext.HandleListNotify(Sender: TObject;
+  const Item: TStreamRequest; Action: TCollectionNotification);
+begin
+  if FUnaryStreams.Count = 0 then
+    FTimerOut.Enabled := False
+  else
+    FTimerOut.Enabled := True;
+end;
+
 function TSessionContext.IsServerContext: Boolean;
 begin
   Result := FHttpOwner is TgoHttp2Server;
@@ -1427,6 +1465,46 @@ begin
   nghttp2_session_mem_recv(FSession_http2, ABuffer, ASize);
 end;
 
+procedure TSessionContext.OnTimeouts(pSender: TObject);
+var
+  vStream: TStreamRequest;
+  vStreamCount: Integer;
+begin
+  System.TMonitor.Enter(FUnaryStreams);
+  for vStreamCount := FUnaryStreams.Count - 1 downto 0 do
+  begin
+    vStream := FUnaryStreams[vStreamCount];
+    if vStream = nil then
+      Continue;
+
+    if vStream.Timeout = 0 then
+    begin
+      FUnaryStreams.Extract(vStream);
+      Continue;
+    end;
+
+    if not vStream.IsUnary then
+    begin
+      FUnaryStreams.Extract(vStream);
+      Continue;
+    end;
+
+    if vStream.IsResponseClosed or vStream.IsRequestClosed  then
+    begin
+      FUnaryStreams.Extract(vStream);
+      Continue;
+    end;
+
+    if now > (IncSecond(vStream.TimeRequestBegin, vStream.Timeout)) then
+    begin
+      vStream.CloseRequestEx(NGHTTP2_REFUSED_STREAM);
+      FUnaryStreams.Extract(vStream);
+    end;
+
+  end;
+  System.TMonitor.Exit(FUnaryStreams);
+end;
+
 { TStreamRequest }
 
 constructor TStreamRequest.Create(aContext: TSessionContext; aStreamID: Integer);
@@ -1438,6 +1516,14 @@ end;
 procedure TStreamRequest.CloseRequest;
 begin
   FReqClosed.Value := True;
+end;
+
+procedure TStreamRequest.CloseRequestEx(ErrorCode: Integer);
+begin
+  if not (ErrorCode in [0..13]) then
+    Exit;
+  nghttp2_submit_rst_stream(FContext.Session_http2, NGHTTP2_FLAG_NONE, FStreamID, ErrorCode);
+  SendRequestData(nil, True);
 end;
 
 procedure TStreamRequest.CloseResponse;
@@ -1454,7 +1540,7 @@ end;
 procedure TStreamRequest.AfterConstruction;
 begin
   inherited;
-
+  FIsUnary := False;
   FRequestHeaders := TgoHttpHeaders2.Create;
   FRequestBuffer := TThreadSafeBuffer.Create;
 

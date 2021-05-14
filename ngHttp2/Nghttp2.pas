@@ -30,7 +30,21 @@ const
   {$ENDIF}
 
 const
+  //NGHTTP2 ERROR CODE
   NGHTTP2_NO_ERROR = 0;
+  NGHTTP2_PROTOCOL_ERROR = 1;
+  NGHTTP2_INTERNAL_ERROR = 2;
+  NGHTTP2_FLOW_CONTROL_ERROR = 3;
+  NGHTTP2_SETTINGS_TIMEOUT = 4;
+  NGHTTP2_STREAM_CLOSED = 5;
+  NGHTTP2_FRAME_SIZE_ERROR = 6;
+  NGHTTP2_REFUSED_STREAM = 7;
+  NGHTTP2_CANCEL = 8;
+  NGHTTP2_COMPRESSION_ERROR = 9;
+  NGHTTP2_CONNECT_ERROR = 10;
+  NGHTTP2_ENHANCE_YOUR_CALM = 11;
+  NGHTTP2_INADEQUATE_SECURITY = 12;
+  NGHTTP2_HTTP_1_1_REQUIRED = 13;
 
   NGHTTP2_ERR_CALLBACK_FAILURE = -902;
 
@@ -57,6 +71,7 @@ const
 
   NGHTTP2_DATA_FLAG_NONE = 0;
   NGHTTP2_DATA_FLAG_EOF = 1;
+  NGHTTP2_DATA_FLAG_NO_END_STREAM = 2;
 
 type
   size_t = NativeUInt;
@@ -194,6 +209,24 @@ type
   nghttp2_on_frame_recv_callback = function(session: pnghttp2_session;
     const frame: pnghttp2_frame; user_data: Pointer): Integer; cdecl;
 
+ type
+
+  { nghttp2_on_frame_send_callback }
+
+  {
+    Callback function invoked after the frame frame is sent.
+    The user_data pointer is the third argument passed in to the call to
+    nghttp2_session_client_new() or nghttp2_session_server_new().
+
+    The implementation of this function must return 0 if it succeeds.
+    If nonzero is returned, it is treated as fatal error and nghttp2_session_send()
+    and nghttp2_session_mem_send() functions
+    immediately return nghttp2_error.NGHTTP2_ERR_CALLBACK_FAILURE.
+  }
+
+  nghttp2_on_frame_send_callback = function(session: pnghttp2_session;
+    const frame: pnghttp2_frame; user_data: Pointer): Integer; cdecl;
+
 type
 { nghttp2_on_data_chunk_recv_callback }
 
@@ -250,6 +283,13 @@ var
   nghttp2_session_callbacks_set_on_begin_headers_callback: procedure(callbacks: pnghttp2_session_callbacks;
     on_header_callback: nghttp2_on_begin_headers_callback); cdecl = nil;
 
+//    void nghttp2_session_callbacks_set_on_frame_send_callback(nghttp2_session_callbacks *cbs, nghttp2_on_frame_send_callbackon_frame_send_callback)
+
+  {Sets callback function after a frame is received}
+
+  nghttp2_session_callbacks_set_on_frame_send_callback: procedure(callbacks: pnghttp2_session_callbacks;
+    on_frame_send_callback: nghttp2_on_frame_send_callback); cdecl = nil;
+
 { Sets callback function invoked by `nghttp2_session_recv()` and `nghttp2_session_mem_recv()`
   when a frame is received. }
   nghttp2_session_callbacks_set_on_frame_recv_callback: procedure(callbacks: pnghttp2_session_callbacks;
@@ -298,6 +338,14 @@ var
   peer. If both `nghttp2_session_want_read()` and * `nghttp2_session_want_write()`
   return 0, the application should drop the connection. }
   nghttp2_session_want_write: function(session: pnghttp2_session): Integer; cdecl = nil;
+
+  {
+    |- int nghttp2_submit_rst_stream(nghttp2_session *session, uint8_t flags, int32_t stream_id, uint32_t error_code) -|
+    Submits RST_STREAM frame to cancel/reject the stream stream_id with the error code error_code.
+  }
+  nghttp2_submit_rst_stream: function(session: pnghttp2_session; flags: uint8; stream_id: int32; error_code: uint32): Integer; cdecl = nil;
+
+  nghttp2_submit_data: function(session: pnghttp2_session; flags: uint8; stream_id: int32; data_provider: pnghttp2_data_provider): Integer; cdecl = nil;
 
 //function MAKE_NV2(name, value: MarshaledAString): nghttp2_nv;
 //function MAKE_NV(name, value: MarshaledAString; valuelen: uint8): nghttp2_nv;
@@ -377,6 +425,7 @@ begin
   nghttp2_session_callbacks_del := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_del');
   nghttp2_session_callbacks_set_on_header_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_header_callback');
   nghttp2_session_callbacks_set_on_begin_headers_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_begin_headers_callback');
+  nghttp2_session_callbacks_set_on_frame_send_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_frame_send_callback');
   nghttp2_session_callbacks_set_on_frame_recv_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_frame_recv_callback');
   nghttp2_session_callbacks_set_on_data_chunk_recv_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_data_chunk_recv_callback');
   nghttp2_session_callbacks_set_on_stream_close_callback := GetProc(NGHTTP2Handle, 'nghttp2_session_callbacks_set_on_stream_close_callback');
@@ -392,6 +441,9 @@ begin
   nghttp2_session_mem_send := GetProc(NGHTTP2Handle, 'nghttp2_session_mem_send');
   nghttp2_session_want_read := GetProc(NGHTTP2Handle, 'nghttp2_session_want_read');
   nghttp2_session_want_write := GetProc(NGHTTP2Handle, 'nghttp2_session_want_write');
+
+  nghttp2_submit_rst_stream := GetProc(NGHTTP2Handle, 'nghttp2_submit_rst_stream');
+  nghttp2_submit_data := GetProc(NGHTTP2Handle, 'nghttp2_submit_data');
 end;
 
 procedure UnloadNGHTTP2;

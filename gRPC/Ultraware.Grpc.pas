@@ -6,7 +6,7 @@ interface
 
 uses
   System.SysUtils, System.Types, System.Classes, Generics.Collections,
-  Grijjy.Http, Grijjy.Http2;
+  Nghttp2, Grijjy.Http, Grijjy.Http2;
 
 type
   TGrpcWaitResult = (wrTimeout, wrNoData, wrData, wrClosed);
@@ -58,6 +58,7 @@ type
     function  CloseAndRecvData(out aResult: TBytes): Boolean;
     function  Recv(out aResult: TBytes; aWaitTimeout: Integer = TIMEOUT_RECV): TGrpcWaitResult;
     procedure DoCloseSend();
+    procedure SendCloseStream();
 
     function IsResponseClosed: Boolean;
     function IsRequestClosed: Boolean;
@@ -71,6 +72,7 @@ type
     {IGrpcStream}
     function  CloseAndRecvData(out aResult: TBytes): Boolean;
     function  Recv(out aResult: TBytes; aWaitTimeout: Integer = TIMEOUT_RECV): TGrpcWaitResult;
+    procedure SendCloseStream();
     procedure DoCloseSend();
     procedure SendData(const aData: TBytes; aClose: Boolean = False);
 
@@ -116,8 +118,12 @@ type
 
   IGrpcClient = interface
     ['{A6132D0A-1EB5-41B2-8F5F-21E2C28CD250}']
-    function DoRequest(const aSendData: TBytes; const aGrpcPath: string; out aReceivedData: TBytes): Boolean; overload;
-    function DoRequest(const aSendData: TBytes; const aGrpcPath: string; const aReceiveCallback: TGrpcCallback): IGrpcStream; overload;
+    function DoRequest(const aSendData: TBytes; const aGrpcPath: string;
+      out aReceivedData: TBytes): Boolean; overload;
+    function DoRequest(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallback; CloseRequest: Boolean): IGrpcStream; overload;
+    function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallback; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
   end;
 
   TGrpcHttp2Client = class(TInterfacedObject, IGrpcClient)
@@ -129,8 +135,12 @@ type
     FReceiveTimeout: Integer;
   protected
     {IGrpcClient}
-    function DoRequest(const aSendData: TBytes; const aGrpcPath: string; out aReceivedData: TBytes): Boolean; overload;
-    function DoRequest(const aSendData: TBytes; const aGrpcPath: string; const aReceiveCallback: TGrpcCallback): IGrpcStream; overload;
+    function DoRequest(const aSendData: TBytes; const aGrpcPath: string;
+      out aReceivedData: TBytes): Boolean; overload;
+    function DoRequest(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallback; CloseRequest: Boolean): IGrpcStream; overload;
+    function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallback; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
   public
     procedure   AfterConstruction; override;
     constructor Create(const aHost: string; aPort: Integer; aSSL: Boolean = False; aConnectTimeout: Integer = TIMEOUT_CONNECT; aReceiveTimeout: Integer = TIMEOUT_RECV);
@@ -351,7 +361,7 @@ end;
 procedure TGrpcHttp2Stream.DoCloseSend;
 begin
   if (FRequest <> nil) then
-    FRequest.SendRequestData(nil, True {close});
+    FRequest.SendRequestData(nil, True);
 end;
 
 constructor TGrpcHttp2Stream.Create(aRequest: TStreamRequest);
@@ -409,6 +419,12 @@ begin
   until MilliSecondsBetween(Now, tstart) > aWaitTimeout;
 end;
 
+procedure TGrpcHttp2Stream.SendCloseStream;
+begin
+  if (FRequest <> nil) then
+    FRequest.CloseRequestEx(NGHTTP2_REFUSED_STREAM);
+end;
+
 procedure TGrpcHttp2Stream.SendData(const aData: TBytes; aClose: Boolean);
 var
   packet: TGrpcPacket;
@@ -459,50 +475,6 @@ begin
   inherited;
 end;
 
-function TGrpcHttp2Client.DoRequest(const aSendData: TBytes; const aGrpcPath: string;
-  const aReceiveCallback: TGrpcCallback): IGrpcStream;
-var
-  packet: TGrpcPacket;
-  session: TSessionContext;
-  request: TStreamRequest;
-begin
-  session := FHttp2.Connect();
-  packet.Create(aSendData);
-  request := session.GetOrCreateStream(-1);
-
-  if Assigned(aReceiveCallback) then
-  begin
-    request.OnFrameReceived := procedure(const aStream: TStreamRequest; out aHandled: Boolean)
-      var packet: TGrpcPacket;
-      begin
-        TGrpcUtil.CheckGrpcResponse(aStream.ResponseHeaders);
-        //process each packet
-        while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
-        begin
-          aReceiveCallback(packet.Data, aStream.IsResponseClosed);
-          aHandled := True;
-          if packet.Data = nil then
-            Break;
-        end;
-      end;
-  end;
-  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
-  request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
-
-  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, False{wait}) then
-  begin
-    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
-    Result := TGrpcHttp2Stream.Create(request);
-  end
-  else
-  begin
-    //todo: recreate session and reconnect?
-
-    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
-    raise Exception.CreateFmt('No connection or response from server: %s', [request.ResponseHeaders.AsString]);
-  end;
-end;
-
 function TGrpcHttp2Client.DoRequest(const aSendData: TBytes; const aGrpcPath: string; out aReceivedData: TBytes): Boolean;
 var
   packet: TGrpcPacket;
@@ -516,7 +488,7 @@ begin
   request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
   request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
 
-  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, True {close}) and
+  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, True) and
      request.WaitForRecvClosed(FReceiveTimeout) then
   begin
     Result := True;
@@ -528,6 +500,95 @@ begin
   begin
     TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
     raise Exception.CreateFmt('No connection or response from server: %s', [request.ResponseHeaders.AsString]);
+  end;
+end;
+
+function TGrpcHttp2Client.DoRequest(const aSendData: TBytes;
+  const aGrpcPath: string; const aReceiveCallback: TGrpcCallback;
+  CloseRequest: Boolean): IGrpcStream;
+var
+  packet: TGrpcPacket;
+  session: TSessionContext;
+  request: TStreamRequest;
+begin
+  session := FHttp2.Connect();
+  packet.Create(aSendData);
+  request := session.GetOrCreateStream(-1);
+
+  if Assigned(aReceiveCallback) then
+  begin
+    request.OnFrameReceived :=
+      procedure(const aStream: TStreamRequest; out aHandled: Boolean)
+      var
+        packet: TGrpcPacket;
+      begin
+        TGrpcUtil.CheckGrpcResponse(aStream.ResponseHeaders);
+        //process each packet
+        while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
+        begin
+          aReceiveCallback(packet.Data, aStream.IsResponseClosed);
+          aHandled := True;
+          if packet.Data = nil then
+            Break;
+        end;
+      end;
+  end;
+
+  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
+  request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
+
+  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, CloseRequest) then
+  begin
+    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
+    Result := TGrpcHttp2Stream.Create(request);
+  end
+  else
+  begin
+    //todo: recreate session and reconnect?
+
+    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
+    raise Exception.CreateFmt('No connection or response from server: %s', [request.ResponseHeaders.AsString]);
+  end;
+end;
+
+function TGrpcHttp2Client.DoUnaryRequestAsync(const aSendData: TBytes;
+  const aGrpcPath: string; const aReceiveCallback: TGrpcCallback; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream;
+var
+  packet: TGrpcPacket;
+  session: TSessionContext;
+  request: TStreamRequest;
+begin
+  session := FHttp2.Connect();
+  packet.Create(aSendData);
+  request := session.GetOrCreateStream(-1);
+  request.TimeRequestBegin := now;
+  request.Timeout := TimeoutInSeconds;
+  request.IsUnary := True;
+
+  if Assigned(aReceiveCallback) then
+  begin
+    request.OnFrameReceived :=
+      procedure(const aStream: TStreamRequest; out aHandled: Boolean)
+      var
+        packet: TGrpcPacket;
+      begin
+        TGrpcUtil.CheckGrpcResponse(aStream.ResponseHeaders);
+        while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
+        begin
+          aReceiveCallback(packet.Data, aStream.IsResponseClosed);
+          aHandled := True;
+          if packet.Data = nil then
+            Break;
+        end;
+      end;
+  end;
+  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
+  request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
+
+  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, True) then
+  begin
+    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
+    Result := TGrpcHttp2Stream.Create(request);
   end;
 end;
 
