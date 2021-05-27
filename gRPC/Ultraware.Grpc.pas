@@ -29,6 +29,7 @@ type
 
   TGrpcUtil = class
     class procedure CheckGrpcResponse(const aHeaders: TgoHttpHeaders);
+    class procedure CheckGrpcResponseEx(const aHeaders: TgoHttpHeaders; out Error: Boolean; out HeaderValues: TArray<string>);
   end;
 
   IGrpcMemStream = interface
@@ -103,6 +104,7 @@ type
   TGrpcCallback = reference to procedure(const aData: TBytes; aIsStreamClosed: Boolean);
   TGrpcCallbackEx = reference to procedure(const aPacket: TGrpcPacket; aIsStreamClosed: Boolean);
   TGrpcErrorCallback = reference to procedure(const aError: Exception);
+  TRequestErrorCallback = procedure(const pRequestPath: string; pErrorInfo: TArray<string>) of object;
 
   TBaseGrpcCallbackStream = class(TInterfacedObject, IGrpcCallbackStream)
   protected
@@ -134,6 +136,8 @@ type
     FPort: Integer;
     FConnectTimeout: Integer;
     FReceiveTimeout: Integer;
+    FOnRequestError: TRequestErrorCallback;
+    function CheckErrorAndCallback(const aRequestPath: string; aHeaders: TgoHttpHeaders2): Boolean;
   protected
     {IGrpcClient}
     function DoRequest(const aSendData: TBytes; const aGrpcPath: string;
@@ -148,6 +152,7 @@ type
     destructor  Destroy; override;
 
     property Http2Client: TgoHttp2Client read FHttp2;
+    property OnRequestError: TRequestErrorCallback read FOnRequestError write FOnRequestError;
   end;
 
   TGrpcClientHandler = class(TInterfacedObject, IGrpcClient)
@@ -192,8 +197,7 @@ type
     FCall: TThreadProcedure;
     procedure Execute; override;
   protected
-    {IRequestThread}
-    procedure Close; override;
+    {IRequestThread}    procedure Close; override;
   public
     constructor Create(const aExecution: TThreadProcedure);
     destructor  Destroy; override;
@@ -261,6 +265,33 @@ begin
      (aHeaders.Value(':status') <> '200')
   then
     raise Exception.CreateFmt('Server error "%s": %s', [aHeaders.Value(':status'), aHeaders.AsString]);
+end;
+
+class procedure TGrpcUtil.CheckGrpcResponseEx(const aHeaders: TgoHttpHeaders; out Error: Boolean;
+  out HeaderValues: TArray<string>);
+var
+  vErrorHeaders: TArray<string>;
+begin
+  Error := False;
+  if (aHeaders.Value('grpc-status') <> '') and
+     (aHeaders.Value('grpc-status') <> '0')
+  then
+  begin
+    SetLength(vErrorHeaders, 2);
+    Error := True;
+    vErrorHeaders[0] := aHeaders.Value('grpc-status');
+    vErrorHeaders[1] := aHeaders.Value('grpc-message');
+  end;
+
+  if (aHeaders.Value(':status') <> '') and
+     (aHeaders.Value(':status') <> '200')
+  then
+  begin
+    SetLength(vErrorHeaders, 2);
+    Error := True;
+    vErrorHeaders[0] := aHeaders.Value(':status');
+    vErrorHeaders[1] := aHeaders.AsString;
+  end;
 end;
 
 { TGrpcPacket }
@@ -514,6 +545,7 @@ var
   session: TSessionContext;
   request: TStreamRequest;
 begin
+  Result := nil;
   session := FHttp2.Connect();
   packet.Create(aSendData);
   request := session.GetOrCreateStream(-1);
@@ -525,8 +557,7 @@ begin
       var
         packet: TGrpcPacket;
       begin
-        TGrpcUtil.CheckGrpcResponse(aStream.ResponseHeaders);
-        //process each packet
+        CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders);
         while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
         begin
           aReceiveCallback(packet, aStream.IsResponseClosed);
@@ -537,20 +568,18 @@ begin
       end;
   end;
 
-  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
+  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
   request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
 
   if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, CloseRequest) then
   begin
-    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
-    Result := TGrpcHttp2Stream.Create(request);
+    if not CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders) then
+      Result := TGrpcHttp2Stream.Create(request);
   end
   else
   begin
-    //todo: recreate session and reconnect?
-
-    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
-    raise Exception.CreateFmt('No connection or response from server: %s', [request.ResponseHeaders.AsString]);
+    if Assigned(OnRequestError) then
+      OnRequestError(aGrpcPath, [request.ResponseHeaders.AsString]);
   end;
 end;
 
@@ -561,6 +590,7 @@ var
   session: TSessionContext;
   request: TStreamRequest;
 begin
+  Result := nil;
   session := FHttp2.Connect();
   packet.Create(aSendData);
   request := session.GetOrCreateStream(-1);
@@ -575,8 +605,7 @@ begin
       var
         packet: TGrpcPacket;
       begin
-        TGrpcUtil.CheckGrpcResponse(aStream.ResponseHeaders);
-
+        CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders);
         while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
         begin
           aReceiveCallback(packet, aStream.IsResponseClosed);
@@ -585,14 +614,27 @@ begin
             Break;
         end;
       end;
-  end;
-  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
+  end;
+  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
   request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
 
   if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, True) then
   begin
-    TGrpcUtil.CheckGrpcResponse(request.ResponseHeaders);
-    Result := TGrpcHttp2Stream.Create(request);
+    if not CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders) then
+      Result := TGrpcHttp2Stream.Create(request);
+  end;
+end;
+
+function TGrpcHttp2Client.CheckErrorAndCallback(const aRequestPath: string; aHeaders: TgoHttpHeaders2): Boolean;
+var
+  vErrorInfo: TArray<string>;
+begin
+  Result := False;
+  TGrpcUtil.CheckGrpcResponseEx(aHeaders, Result, vErrorInfo);
+  if Result then
+  begin
+    if Assigned(OnRequestError) then
+      OnRequestError(aRequestPath, vErrorInfo);
   end;
 end;
 
