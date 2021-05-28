@@ -605,7 +605,8 @@ begin
       var
         packet: TGrpcPacket;
       begin
-        CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders);
+        if CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders) then
+          Exit;
         while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
         begin
           aReceiveCallback(packet, aStream.IsResponseClosed);
