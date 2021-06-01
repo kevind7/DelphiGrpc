@@ -470,7 +470,7 @@ begin
     else if (frame.headers.cat = NGHTTP2_HCAT_REQUEST) then
     begin
       stream_data := context.GetOrCreateStream(frame.hd.stream_id);
-      Result := nghttp2_session_set_stream_user_data(session, frame.hd.stream_id, stream_data);
+      Result := TNGHTTP2.GetInstance.nghttp2_session_set_stream_user_data(session, frame.hd.stream_id, stream_data);
     end;
   end;
 end;
@@ -596,13 +596,13 @@ begin
   inherited Create(aRemoteAddress, aRemotePort, aSSL);
 
   { initialize nghttp2 library }
-  if nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
+  if TNGHTTP2.GetInstance.nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
   begin
-    nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
-    nghttp2_session_callbacks_set_on_begin_headers_callback(FCallbacks_http2, on_begin_headers_callback);
-    nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
-    nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
-    nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_begin_headers_callback(FCallbacks_http2, on_begin_headers_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
   end
   else
     raise Exception.Create('Unable to setup ngHttp2 callbacks.');
@@ -614,7 +614,7 @@ end;
 destructor TgoHttp2Client.Destroy;
 begin
   {$IFDEF HTTP2}
-  nghttp2_session_callbacks_del(FCallbacks_http2);
+  TNGHTTP2.GetInstance.nghttp2_session_callbacks_del(FCallbacks_http2);
   {$ENDIF}
 
   inherited Destroy;
@@ -837,14 +837,14 @@ constructor TgoHttp2Server.Create(const aBindAddress: string; aBindPort: Integer
   inherited Create(aBindAddress, aBindPort, aSSL);
 
   { initialize nghttp2 library }
-  if nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
+  if TNGHTTP2.GetInstance.nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
   begin
-    nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
-    nghttp2_session_callbacks_set_on_begin_headers_callback(FCallbacks_http2, on_begin_headers_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_begin_headers_callback(FCallbacks_http2, on_begin_headers_callback);
 
-    nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
-    nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
-    nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
   end
   else
     raise Exception.Create('Unable to setup ngHttp2 callbacks.');
@@ -1022,11 +1022,11 @@ begin
   //init client or server session
   if IsServerContext then
   begin
-    error := nghttp2_session_server_new(FSession_http2, FCallbacks_http2, Self)
+    error := TNGHTTP2.GetInstance.nghttp2_session_server_new(FSession_http2, FCallbacks_http2, Self)
   end
   else
   begin
-    error := nghttp2_session_client_new(FSession_http2, FCallbacks_http2, Self);
+    error := TNGHTTP2.GetInstance.nghttp2_session_client_new(FSession_http2, FCallbacks_http2, Self);
     FConnected := TEvent.Create(nil, False, False, '');
   end;
   if error <> 0 then
@@ -1035,25 +1035,25 @@ begin
   //init settings
   settings.settings_id := NGHTTP2_SETTINGS_ENABLE_PUSH;
   settings.value := 0;
-  error := nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
+  error := TNGHTTP2.GetInstance.nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
   if (error <> 0) then
     raise Exception.CreateFmt('Unable to submit ngHttp2 settings (errorcode: %d)', [error]);
 
   settings.settings_id := NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
   settings.value := 100;
-  error := nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
+  error := TNGHTTP2.GetInstance.nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
   if (error <> 0) then
     raise Exception.CreateFmt('Unable to submit ngHttp2 settings (errorcode: %d)', [error]);
 
   settings.settings_id := NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
   settings.value := 1048576;
-  error := nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
+  error := TNGHTTP2.GetInstance.nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
   if (error <> 0) then
     raise Exception.CreateFmt('Unable to submit ngHttp2 settings (errorcode: %d)', [error]);
 
   settings.settings_id := NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE;
   settings.value := 16384;
-  error := nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
+  error := TNGHTTP2.GetInstance.nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @settings, 1);
   if (error <> 0) then
     raise Exception.CreateFmt('Unable to submit ngHttp2 settings (errorcode: %d)', [error]);
 end;
@@ -1063,7 +1063,7 @@ begin
   FTimerOut.Free;
   FStreams.Free;
   FUnaryStreams.Free;
-  nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
+  TNGHTTP2.GetInstance.nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
   Disconnect;
   FConnected.Free;
   inherited;
@@ -1096,13 +1096,13 @@ begin
     if FConnection = nil then
       Exit(False);
 
-    iLoop := nghttp2_session_want_write(FSession_http2);
+    iLoop := TNGHTTP2.GetInstance.nghttp2_session_want_write(FSession_http2);
     TInterlocked.Increment(Self.FPendingSendCount);
 
     //see data_source_response_read_callback
-    while nghttp2_session_want_write(FSession_http2) > 0 do
+    while TNGHTTP2.GetInstance.nghttp2_session_want_write(FSession_http2) > 0 do
     begin
-      len := nghttp2_session_mem_send(FSession_http2, data);
+      len := TNGHTTP2.GetInstance.nghttp2_session_mem_send(FSession_http2, data);
       if (len > 0) then
       begin
         SetLength(bytes, len);
@@ -1205,7 +1205,7 @@ begin
     _NGHTTP2_HEADERS:
     // Check that the client request has finished
     begin
-      stream_data := nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
+      stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
       // For DATA and HEADERS frame, this callback may be called after on_stream_close_callback. Check that stream still alive. */
       if stream_data = nil then
       begin
@@ -1249,7 +1249,7 @@ begin
 
     if (frame.headers.cat = NGHTTP2_HCAT_RESPONSE) or (frame.headers.cat = NGHTTP2_HCAT_HEADERS) then
     begin
-      stream_data := nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
+      stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
       stream_data.ResponseHeaders.AddOrSet(AName, AValue);
       {$IFDEF LOGGING}
       //grLog(AName, AValue);
@@ -1257,7 +1257,7 @@ begin
     end
     else if (frame.headers.cat = NGHTTP2_HCAT_REQUEST) then
     begin
-      stream_data := nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
+      stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
       stream_data.RequestHeaders.AddOrSet(AName, AValue);
 
       { path }
@@ -1322,9 +1322,9 @@ begin
     System.TMonitor.Enter(Self);
     try
       if stream_data.ResponseBuffer.Size > 0 then
-        Result := nghttp2_submit_response(session, stream_data.StreamID, @ngheaders[0], Length(ngheaders), @stream_data.FResponseProvider)
+        Result := TNGHTTP2.GetInstance.nghttp2_submit_response(session, stream_data.StreamID, @ngheaders[0], Length(ngheaders), @stream_data.FResponseProvider)
       else
-        Result := nghttp2_submit_response(session, stream_data.StreamID, @ngheaders[0], Length(ngheaders), nil);
+        Result := TNGHTTP2.GetInstance.nghttp2_submit_response(session, stream_data.StreamID, @ngheaders[0], Length(ngheaders), nil);
     finally
       System.TMonitor.Exit(Self);
     end;
@@ -1462,7 +1462,7 @@ begin
   {$IFDEF LOGGING}
   //grLog(Format('OnSocketRecv (ThreadId=%d, Size=%d)', [GetCurrentThreadId, ASize]), ABuffer, ASize);
   {$ENDIF}
-  nghttp2_session_mem_recv(FSession_http2, ABuffer, ASize);
+  TNGHTTP2.GetInstance.nghttp2_session_mem_recv(FSession_http2, ABuffer, ASize);
 end;
 
 procedure TSessionContext.OnTimeouts(pSender: TObject);
@@ -1522,7 +1522,7 @@ procedure TStreamRequest.CloseRequestEx(ErrorCode: Integer);
 begin
   if not (ErrorCode in [0..13]) then
     Exit;
-  nghttp2_submit_rst_stream(FContext.Session_http2, NGHTTP2_FLAG_NONE, FStreamID, ErrorCode);
+  TNGHTTP2.GetInstance.nghttp2_submit_rst_stream(FContext.Session_http2, NGHTTP2_FLAG_NONE, FStreamID, ErrorCode);
   SendRequestData(nil, True);
 end;
 
@@ -1668,7 +1668,7 @@ begin
     { submit request }
     TMonitor.Enter(FContext);
     try
-      FStreamId := nghttp2_submit_request(FContext.FSession_http2, Nil, @headers[0], Length(headers), @FRequestProvider, Self);
+      FStreamId := TNGHTTP2.GetInstance.nghttp2_submit_request(FContext.FSession_http2, Nil, @headers[0], Length(headers), @FRequestProvider, Self);
       {$IFDEF LOGGING}
       OutputDebug(Format('New request = %d',[FStreamId]));
       {$ENDIF}

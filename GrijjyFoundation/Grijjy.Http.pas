@@ -961,17 +961,17 @@ begin
 
   { initialize nghttp2 library }
   {$IFDEF HTTP2}
-  if nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
+  if TNGHTTP2.GetInstance.nghttp2_session_callbacks_new(FCallbacks_http2) = 0 then
   begin
-    nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
-    nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
-    nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
-    nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
-    if (nghttp2_session_client_new(FSession_http2, FCallbacks_http2, Self) = 0) then
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_header_callback(FCallbacks_http2, on_header_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_frame_recv_callback(FCallbacks_http2, on_frame_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_data_chunk_recv_callback(FCallbacks_http2, on_data_chunk_recv_callback);
+    TNGHTTP2.GetInstance.nghttp2_session_callbacks_set_on_stream_close_callback(FCallbacks_http2, on_stream_close_callback);
+    if (TNGHTTP2.GetInstance.nghttp2_session_client_new(FSession_http2, FCallbacks_http2, Self) = 0) then
     begin
       Settings.settings_id := NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
       Settings.value := 100;
-      Error := nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @Settings, 1);
+      Error := TNGHTTP2.GetInstance.nghttp2_submit_settings(FSession_http2, NGHTTP2_FLAG_NONE, @Settings, 1);
       if (Error <> 0) then
         raise Exception.Create('Unable to submit ngHttp2 settings');
     end
@@ -1008,8 +1008,8 @@ var
   Connection: TgoSocketConnection;
 begin
   {$IFDEF HTTP2}
-  nghttp2_session_callbacks_del(FCallbacks_http2);
-  nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
+  TNGHTTP2.GetInstance.nghttp2_session_callbacks_del(FCallbacks_http2);
+  TNGHTTP2.GetInstance.nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
   {$ENDIF}
   FConnectionLock.Enter;
   try
@@ -1154,9 +1154,9 @@ var
   Bytes: TBytes;
 begin
   Result := False;
-  while nghttp2_session_want_write(FSession_http2) > 0 do
+  while TNGHTTP2.GetInstance.nghttp2_session_want_write(FSession_http2) > 0 do
   begin
-    len := nghttp2_session_mem_send(FSession_http2, data);
+    len := TNGHTTP2.GetInstance.nghttp2_session_mem_send(FSession_http2, data);
     if len > 0 then
     begin
       SetLength(Bytes, len);
@@ -1175,7 +1175,7 @@ var
 begin
   Result := FRecvBuffer.Read(Bytes);
   if Result then
-    nghttp2_session_mem_recv(FSession_http2, @Bytes[0], Length(Bytes));
+    TNGHTTP2.GetInstance.nghttp2_session_mem_recv(FSession_http2, @Bytes[0], Length(Bytes));
 end;
 {$ENDIF}
 
@@ -1409,7 +1409,7 @@ begin
         FSendBuffer.Write(@Data[0], Length(Data));
 
         { submit request }
-        FStreamId2 := nghttp2_submit_request(FSession_http2, Nil, @FHeaders2[0], Length(FHeaders2), @DataProvider, Self);
+        FStreamId2 := TNGHTTP2.GetInstance.nghttp2_submit_request(FSession_http2, Nil, @FHeaders2[0], Length(FHeaders2), @DataProvider, Self);
         if FStreamId2 >= 0 then
           Result := nghttp2_Send;
       end

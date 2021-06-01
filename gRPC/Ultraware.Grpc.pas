@@ -104,7 +104,7 @@ type
   TGrpcCallback = reference to procedure(const aData: TBytes; aIsStreamClosed: Boolean);
   TGrpcCallbackEx = reference to procedure(const aPacket: TGrpcPacket; aIsStreamClosed: Boolean);
   TGrpcErrorCallback = reference to procedure(const aError: Exception);
-  TRequestErrorCallback = procedure(const pRequestPath: string; pErrorInfo: TArray<string>) of object;
+  TRequestErrorCallback = procedure(const pRequestPath: string; const pErrorInfo: TArray<string>) of object;
 
   TBaseGrpcCallbackStream = class(TInterfacedObject, IGrpcCallbackStream)
   protected
