@@ -357,7 +357,8 @@ begin
       fLibeayHandle := 0;
     end;
   end;
-  //TODO-1 -> OnBeforeDestroy -> _MemBufferPool.Free;
+  if (@TOpenSSL.OnDestroy) <> nil then
+    TOpenSSL.OnDestroy();
   inherited Destroy;
 end;
 
@@ -570,7 +571,8 @@ begin
     else
       Result := 0;
     SSLInitialize;
-    //TODO - 1 -> OnBeforeCreate -> _MemBufferPool := TgoMemoryPool.Create(DEFAULT_BLOCK_SIZE);
+    if (@TOpenSSL.OnCreate) <> nil then
+      TOpenSSL.OnCreate();
   end;
 end;
 
