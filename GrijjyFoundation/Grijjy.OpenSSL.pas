@@ -79,16 +79,13 @@ type
 
   { Helper class for SSL }
   TgoSSLHelper = class
-  private class var
-    FTarget: Integer;
   public
-    class procedure LoadSSL;
-    class procedure UnloadSSL;
+    class procedure CreateMemBuffer;
+    class procedure DestroyMemBuffer;
     class procedure SetCertificate(ctx: PSSL_CTX; const ACertificate, APrivateKey: TBytes;
       const APassword: UnicodeString = ''); overload;
     class procedure SetCertificate(ctx: PSSL_CTX; const ACertificateFile, APrivateKeyFile: UnicodeString;
       const APassword: UnicodeString = ''); overload;
-  public
     class function Sign_RSASHA256(const AData: TBytes; const APrivateKey: TBytes;
       out ASignature: TBytes): Boolean;
     class function HMAC_SHA256(const AKey, AData: RawByteString): String;
@@ -120,7 +117,7 @@ end;
 destructor TgoOpenSSL.Destroy;
 begin
   Release;
-  ERR_remove_thread_state(0);
+  TOpenSSL.GetInstance.ERR_remove_thread_state(0);
   inherited Destroy;
 end;
 
@@ -129,22 +126,22 @@ begin
   Result := False;
 
   { create ssl context }
-  FSSLContext := SSL_CTX_new(SSLv23_method);
+  FSSLContext := TOpenSSL.GetInstance.SSL_CTX_new(TOpenSSL.GetInstance.SSLv23_method);
   if FSSLContext <> nil then
   begin
     { if we are connecting using the http2 protocol and TLS }
     if AALPN then
     begin
       { force TLS 1.2 }
-      SetSSLCTXOptions(FSSLContext,
+      TOpenSSL.GetInstance.SetSSLCTXOptions(FSSLContext,
         SSL_OP_ALL + SSL_OP_NO_SSLv2 + SSL_OP_NO_SSLv3 + SSL_OP_NO_COMPRESSION);
 
       { enable Application-Layer Protocol Negotiation Extension }
-      SSL_CTX_set_alpn_protos(FSSLContext, #2'h2', 3);
+      TOpenSSL.GetInstance.SSL_CTX_set_alpn_protos(FSSLContext, #2'h2', 3);
     end;
 
     { no certificate validation }
-    SSL_CTX_set_verify(FSSLContext, SSL_VERIFY_NONE, nil);
+    TOpenSSL.GetInstance.SSL_CTX_set_verify(FSSLContext, SSL_VERIFY_NONE, nil);
 
     { apply PEM Certificate }
     if FCertificate <> nil then
@@ -173,23 +170,23 @@ begin
     end;
 
     { create an SSL struct for the connection }
-    FSSL := SSL_new(FSSLContext);
+    FSSL := TOpenSSL.GetInstance.SSL_new(FSSLContext);
     if FSSL <> nil then
     begin
       { create the read and write BIO }
-      FBIORead := BIO_new(BIO_s_mem);
+      FBIORead := TOpenSSL.GetInstance.BIO_new(TOpenSSL.GetInstance.BIO_s_mem);
       if FBIORead <> nil then
       begin
-        FBIOWrite := BIO_new(BIO_s_mem);
+        FBIOWrite := TOpenSSL.GetInstance.BIO_new(TOpenSSL.GetInstance.BIO_s_mem);
         if FBIOWrite <> nil then
         begin
           FHandshaking := True;
 
           { relate the BIO to the SSL object }
-          SSL_set_bio(FSSL, FBIORead, FBIOWrite);
+          TOpenSSL.GetInstance.SSL_set_bio(FSSL, FBIORead, FBIOWrite);
 
           { ssl session should start the negotiation }
-          SSL_set_connect_state(FSSL);
+          TOpenSSL.GetInstance.SSL_set_connect_state(FSSL);
 
           { allocate buffers }
           FSSLWriteBuffer :=_MemBufferPool.RequestMem;
@@ -211,14 +208,14 @@ begin
   { free handle }
   if FSSL <> nil then
   begin
-    SSL_shutdown(FSSL);
-    SSL_free(FSSL);
+    TOpenSSL.GetInstance.SSL_shutdown(FSSL);
+    TOpenSSL.GetInstance.SSL_free(FSSL);
     FSSL := nil;
   end;
   { free context }
   if FSSLContext <> nil then
   begin
-    SSL_CTX_free(FSSLContext);
+    TOpenSSL.GetInstance.SSL_CTX_free(FSSLContext);
     FSSLContext := nil;
   end;
   { release buffers }
@@ -241,14 +238,14 @@ var
 begin
   while True do
   begin
-    BIO_write(FBIORead, ABuffer, ASize);
-    if not BIORetry(FBIORead) then
+    TOpenSSL.GetInstance.BIO_write(FBIORead, ABuffer, ASize);
+    if not TOpenSSL.GetInstance.BIORetry(FBIORead) then
       Break;
   end;
 
   while True do
   begin
-    Bytes := SSL_read(FSSL, FSSLReadBuffer, DEFAULT_BLOCK_SIZE);
+    Bytes := TOpenSSL.GetInstance.SSL_read(FSSL, FSSLReadBuffer, DEFAULT_BLOCK_SIZE);
     if Bytes > 0 then
     begin
       if Assigned(FOnRead) then
@@ -256,8 +253,8 @@ begin
     end
     else
     begin
-      Error := SSL_get_error(FSSL, Bytes);
-      if not SSLErrorFatal(Error) then
+      Error := TOpenSSL.GetInstance.SSL_get_error(FSSL, Bytes);
+      if not TOpenSSL.GetInstance.SSLErrorFatal(Error) then
         Break
       else
         Exit;
@@ -265,9 +262,9 @@ begin
   end;
 
   { handshake data needs to be written? }
-  if BIO_ctrl(FBIOWrite, BIO_CTRL_PENDING, 0, nil) <> 0 then
+  if TOpenSSL.GetInstance.BIO_ctrl(FBIOWrite, BIO_CTRL_PENDING, 0, nil) <> 0 then
   begin
-    Bytes := BIO_read(FBIOWrite, FSSLWriteBuffer, DEFAULT_BLOCK_SIZE);
+    Bytes := TOpenSSL.GetInstance.BIO_read(FBIOWrite, FSSLWriteBuffer, DEFAULT_BLOCK_SIZE);
     if Bytes > 0 then
     begin
       if Assigned(FOnWrite) then
@@ -275,15 +272,15 @@ begin
     end
     else
     begin
-      Error := SSL_get_error(FSSL, Bytes);
-      if SSLErrorFatal(Error) then
+      Error := TOpenSSL.GetInstance.SSL_get_error(FSSL, Bytes);
+      if TOpenSSL.GetInstance.SSLErrorFatal(Error) then
         Exit;
     end;
   end;
 
   { with ssl we are only connected and can write once the handshake is finished }
   if FHandshaking then
-    if SSL_state(FSSL) = SSL_ST_OK then
+    if TOpenSSL.GetInstance.SSL_state(FSSL) = SSL_ST_OK then
     begin
       FHandshaking := False;
       if Assigned(FOnConnected) then
@@ -298,17 +295,17 @@ var
 begin
   Result := False;
 
-  Bytes := SSL_write(FSSL, ABuffer, ASize);
+  Bytes := TOpenSSL.GetInstance.SSL_write(FSSL, ABuffer, ASize);
   if Bytes <> ASize then
   begin
-    Error := SSL_get_error(FSSL, Bytes);
-    if SSLErrorFatal(Error) then
+    Error := TOpenSSL.GetInstance.SSL_get_error(FSSL, Bytes);
+    if TOpenSSL.GetInstance.SSLErrorFatal(Error) then
       Exit;
   end;
 
-  while BIO_ctrl(FBIOWrite, BIO_CTRL_PENDING, 0, nil) <> 0 do
+  while TOpenSSL.GetInstance.BIO_ctrl(FBIOWrite, BIO_CTRL_PENDING, 0, nil) <> 0 do
   begin
-    Bytes := BIO_read(FBIOWrite, FSSLWriteBuffer, DEFAULT_BLOCK_SIZE);
+    Bytes := TOpenSSL.GetInstance.BIO_read(FBIOWrite, FSSLWriteBuffer, DEFAULT_BLOCK_SIZE);
     if Bytes > 0 then
     begin
       Result := True;
@@ -317,8 +314,8 @@ begin
     end
     else
     begin
-      Error := SSL_get_error(FSSL, Bytes);
-      if SSLErrorFatal(Error) then
+      Error := TOpenSSL.GetInstance.SSL_get_error(FSSL, Bytes);
+      if TOpenSSL.GetInstance.SSLErrorFatal(Error) then
         Exit;
     end;
   end;
@@ -329,31 +326,11 @@ var
   ALPN: MarshaledAString;
   ALPNLen: Integer;
 begin
-  SSL_get0_alpn_selected(FSSL, ALPN, ALPNLen);
+  TOpenSSL.GetInstance.SSL_get0_alpn_selected(FSSL, ALPN, ALPNLen);
   Result := (ALPNLen = 2) and (ALPN[0] = 'h') and (ALPN[1] = '2');
 end;
 
 { TgoSSLHelper }
-
-class procedure TgoSSLHelper.LoadSSL;
-begin
-  if (TInterlocked.Increment(FTarget) = 1) then
-  begin
-    LoadLIBEAY;
-    LoadSSLEAY;
-    SSLInitialize;
-  end;
-end;
-
-class procedure TgoSSLHelper.UnloadSSL;
-begin
-  if (TInterlocked.Decrement(FTarget) = 0) then
-  begin
-    SSLFinalize;
-    UnloadSSLEAY;
-    UnloadLIBEAY;
-  end;
-end;
 
 class procedure TgoSSLHelper.SetCertificate(ctx: PSSL_CTX; const ACertificate, APrivateKey: TBytes;
   const APassword: UnicodeString = '');
@@ -363,23 +340,23 @@ var
   PrivateKey: PEVP_PKEY;
   Password: RawByteString;
 begin
-	BIOCert := BIO_new_mem_buf(@ACertificate[0], Length(ACertificate));
-	BIOPrivateKey := BIO_new_mem_buf(@APrivateKey[0], Length(APrivateKey));
-	Certificate := PEM_read_bio_X509(BIOCert, nil, nil, nil);
+	BIOCert := TOpenSSL.GetInstance.BIO_new_mem_buf(@ACertificate[0], Length(ACertificate));
+	BIOPrivateKey := TOpenSSL.GetInstance.BIO_new_mem_buf(@APrivateKey[0], Length(APrivateKey));
+	Certificate := TOpenSSL.GetInstance.PEM_read_bio_X509(BIOCert, nil, nil, nil);
   if APassword <> '' then
   begin
     Password := MarshaledAString(RawByteString(APassword));
-	  PrivateKey := PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, @Password[1]);
+	  PrivateKey := TOpenSSL.GetInstance.PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, @Password[1]);
   end
   else
-	  PrivateKey := PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, nil);
-	SSL_CTX_use_certificate(ctx, Certificate);
-	SSL_CTX_use_privatekey(ctx, PrivateKey);
-	X509_free(Certificate);
-	EVP_PKEY_free(PrivateKey);
-	BIO_free(BIOCert);
-	BIO_free(BIOPrivateKey);
-  if (SSL_CTX_check_private_key(ctx) = 0) then
+	  PrivateKey := TOpenSSL.GetInstance.PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, nil);
+	TOpenSSL.GetInstance.SSL_CTX_use_certificate(ctx, Certificate);
+	TOpenSSL.GetInstance.SSL_CTX_use_privatekey(ctx, PrivateKey);
+	TOpenSSL.GetInstance.X509_free(Certificate);
+	TOpenSSL.GetInstance.EVP_PKEY_free(PrivateKey);
+	TOpenSSL.GetInstance.BIO_free(BIOCert);
+	TOpenSSL.GetInstance.BIO_free(BIOPrivateKey);
+  if (TOpenSSL.GetInstance.SSL_CTX_check_private_key(ctx) = 0) then
     raise Exception.Create('Private key does not match the certificate public key');
 end;
 
@@ -402,22 +379,22 @@ var
   SHA256: PEVP_MD;
   Size: Cardinal;
 begin
-	BIOPrivateKey := BIO_new_mem_buf(@APrivateKey[0], Length(APrivateKey));
-  PrivateKey := PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, nil);
-  Ctx := EVP_MD_CTX_create;
+	BIOPrivateKey := TOpenSSL.GetInstance.BIO_new_mem_buf(@APrivateKey[0], Length(APrivateKey));
+  PrivateKey := TOpenSSL.GetInstance.PEM_read_bio_PrivateKey(BIOPrivateKey, nil, nil, nil);
+  Ctx := TOpenSSL.GetInstance.EVP_MD_CTX_create;
   try
-    SHA256 := EVP_sha256;
-    if (EVP_DigestSignInit(Ctx, nil, SHA256, nil, PrivateKey) > 0) and
-      (EVP_DigestUpdate(Ctx, @AData[0], Length(AData)) > 0) and
-      (EVP_DigestSignFinal(Ctx, nil, Size) > 0) then
+    SHA256 := TOpenSSL.GetInstance.EVP_sha256;
+    if (TOpenSSL.GetInstance.EVP_DigestSignInit(Ctx, nil, SHA256, nil, PrivateKey) > 0) and
+      (TOpenSSL.GetInstance.EVP_DigestUpdate(Ctx, @AData[0], Length(AData)) > 0) and
+      (TOpenSSL.GetInstance.EVP_DigestSignFinal(Ctx, nil, Size) > 0) then
     begin
       SetLength(ASignature, Size);
-      Result := EVP_DigestSignFinal(Ctx, @ASignature[0], Size) > 0;
+      Result := TOpenSSL.GetInstance.EVP_DigestSignFinal(Ctx, @ASignature[0], Size) > 0;
     end
     else
       Result := False;
   finally
-    EVP_MD_CTX_destroy(Ctx);
+    TOpenSSL.GetInstance.EVP_MD_CTX_destroy(Ctx);
   end;
 end;
 
@@ -431,7 +408,7 @@ var
 begin
   Size := EVP_MAX_MD_SIZE;
   SetLength(Buffer, Size);
-  MessageAuthCode := HMAC(EVP_sha256, @AKey[1], Length(AKey), @AData[1], Length(AData), @Buffer[0], Size);
+  MessageAuthCode := TOpenSSL.GetInstance.HMAC(TOpenSSL.GetInstance.EVP_sha256, @AKey[1], Length(AKey), @AData[1], Length(AData), @Buffer[0], Size);
   if MessageAuthCode <> nil then
   begin
     SetLength(Text, Size * 2);
@@ -449,19 +426,28 @@ var
 begin
   Size := EVP_MAX_MD_SIZE;
   SetLength(Result, Size);
-  MessageAuthCode := HMAC(EVP_sha1, @AKey[1], Length(AKey), @AData[1], Length(AData), @Result[0], Size);
+  MessageAuthCode := TOpenSSL.GetInstance.HMAC(TOpenSSL.GetInstance.EVP_sha1, @AKey[1], Length(AKey), @AData[1], Length(AData), @Result[0], Size);
   if MessageAuthCode <> nil then
     SetLength(Result, Size);
 end;
 
-initialization
-  TgoSSLHelper.LoadSSL;
-  SSL_load_error_strings;
-  SSL_library_init;
+
+class procedure TgoSSLHelper.CreateMemBuffer;
+begin
   _MemBufferPool := TgoMemoryPool.Create(DEFAULT_BLOCK_SIZE);
+end;
+
+class procedure TgoSSLHelper.DestroyMemBuffer;
+begin
+  _MemBufferPool.Free;
+end;
+
+initialization
+  TOpenSSL.OnCreate := TgoSSLHelper.CreateMemBuffer;
+  TOpenSSL.OnDestroy := TgoSSLHelper.DestroyMemBuffer;
 
 finalization
-  TgoSSLHelper.UnloadSSL;
-  _MemBufferPool.Free;
+  TOpenSSL.OnCreate := nil;
+  TOpenSSL.OnDestroy := nil;
 
 end.
