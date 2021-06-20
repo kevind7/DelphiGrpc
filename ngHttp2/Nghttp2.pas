@@ -74,7 +74,11 @@ type
   puint8 = ^uint8;
   puint32 = ^uint32;
 
+  pnghttp2_option = Pointer;
+  ppnghttp2_option = ^pnghttp2_option;
+
   pnghttp2_session = Pointer;
+  ppnghttp2_session = ^pnghttp2_session;
 
   pnghttp2_session_callbacks = Pointer;
   nghttp2_nv = record
@@ -176,11 +180,14 @@ type
     fLibHandle: THandle;
   public
     nghttp2_submit_settings: function(session: pnghttp2_session; flags: uint8; const iv: pnghttp2_settings_entry; niv: size_t): Integer; cdecl;
+
     nghttp2_session_client_new: function(var session_ptr: pnghttp2_session;
       const callbacks: pnghttp2_session_callbacks; user_data: Pointer): Integer; cdecl;
 
     nghttp2_session_server_new: function(var session_ptr: pnghttp2_session;
       const callbacks: pnghttp2_session_callbacks; user_data: Pointer): Integer; cdecl;
+
+    nghttp2_session_del: procedure(session_ptr: pnghttp2_session); cdecl;
 
     nghttp2_session_callbacks_new: function(out callbacks_ptr: pnghttp2_session_callbacks): Integer; cdecl;
 
@@ -230,6 +237,12 @@ type
 
     nghttp2_submit_data: function(session: pnghttp2_session; flags: uint8; stream_id: int32; data_provider: pnghttp2_data_provider): Integer; cdecl;
 
+    nghttp2_option_new: function(var option: pnghttp2_option): Integer; cdecl;
+
+    nghttp2_option_del: procedure(option: ppnghttp2_option); cdecl;
+
+    nghttp2_option_set_no_closed_streams: procedure(session: pnghttp2_session; val: int32); cdecl;
+
     function StartUp: Integer;
     destructor Destroy; override;
     class function GetInstance: TNGHTTP2;
@@ -240,6 +253,7 @@ type
 implementation
 
 uses
+  //USharedLibsHandler,
   System.Classes,
   {$IFDEF MSWINDOWS}
   Windows,
@@ -290,15 +304,23 @@ begin
 end;
 
 function TNGHTTP2.StartUp: Integer;
+var
+  vPath: string;
 begin
-  Result := -1;
+  {$IFDEF WIN64}
+  vPath := 'D:\gRPCLib\Libraries\Win64\';
+  {$ELSE}
+  vPath := 'D:\gRPCLib\Libraries\Win32\';
+  {$ENDIF}
+  vPath := vPath + NGHTTP2_LIB;
 
-  fLibHandle := LoadLibrary(PWideChar(NGHTTP2_LIB));
+  fLibHandle := LoadLibraryEx(PWideChar(vPath), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
   if fLibHandle <> 0 then
   begin
     nghttp2_submit_settings := GetProcAddress(fLibHandle, 'nghttp2_submit_settings');
     nghttp2_session_client_new := GetProcAddress(fLibHandle, 'nghttp2_session_client_new');
     nghttp2_session_server_new := GetProcAddress(fLibHandle, 'nghttp2_session_server_new');
+    nghttp2_session_del := GetProcAddress(fLibHandle, 'nghttp2_session_del');
     nghttp2_session_callbacks_new := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_new');
     nghttp2_session_callbacks_del := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_del');
     nghttp2_session_callbacks_set_on_header_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_on_header_callback');
@@ -318,11 +340,15 @@ begin
     nghttp2_session_want_write := GetProcAddress(fLibHandle, 'nghttp2_session_want_write');
     nghttp2_submit_rst_stream := GetProcAddress(fLibHandle, 'nghttp2_submit_rst_stream');
     nghttp2_submit_data := GetProcAddress(fLibHandle, 'nghttp2_submit_data');
+    nghttp2_option_new := GetProcAddress(fLibHandle, 'nghttp2_option_new');
+    nghttp2_option_del := GetProcAddress(fLibHandle, 'nghttp2_option_del');
+    nghttp2_option_set_no_closed_streams := GetProcAddress(fLibHandle, 'nghttp2_option_set_no_closed_streams');
   end;
 
   if (@nghttp2_submit_settings = nil) or
     (@nghttp2_session_client_new = nil) or
     (@nghttp2_session_server_new = nil) or
+    (@nghttp2_session_del = nil) or
     (@nghttp2_session_callbacks_new = nil) or
     (@nghttp2_session_callbacks_del = nil) or
     (@nghttp2_session_callbacks_set_on_header_callback = nil) or
@@ -341,7 +367,10 @@ begin
     (@nghttp2_session_want_read = nil) or
     (@nghttp2_session_want_write = nil) or
     (@nghttp2_submit_rst_stream = nil) or
-    (@nghttp2_submit_data = nil) then
+    (@nghttp2_submit_data = nil) or
+    (@nghttp2_option_set_no_closed_streams = nil) or
+    (@nghttp2_option_del = nil) or
+    (@nghttp2_option_new = nil) then
       Result := -1
     else
       Result := 0;

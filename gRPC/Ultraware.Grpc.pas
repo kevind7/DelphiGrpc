@@ -127,6 +127,8 @@ type
       const aReceiveCallback: TGrpcCallbackEx; CloseRequest: Boolean): IGrpcStream; overload;
     function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
       const aReceiveCallback: TGrpcCallbackEx; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
+    procedure DoUnaryRequestAsyncEx(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallbackEx; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
   end;
 
   TGrpcHttp2Client = class(TInterfacedObject, IGrpcClient)
@@ -146,6 +148,8 @@ type
       const aReceiveCallback: TGrpcCallbackEx; CloseRequest: Boolean): IGrpcStream; overload;
     function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
       const aReceiveCallback: TGrpcCallbackEx; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
+    procedure DoUnaryRequestAsyncEx(const aSendData: TBytes; const aGrpcPath: string;
+      const aReceiveCallback: TGrpcCallbackEx; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
   public
     procedure   AfterConstruction; override;
     constructor Create(const aHost: string; aPort: Integer; aSSL: Boolean = False; aConnectTimeout: Integer = TIMEOUT_CONNECT; aReceiveTimeout: Integer = TIMEOUT_RECV);
@@ -416,6 +420,7 @@ begin
     end;
     FRequest.OnFrameReceived := nil;
     FRequest.OnDestroy := nil;
+    FRequest.fRemoveSelfFromContext(FRequest);
   end;
   inherited;
 end;
@@ -464,9 +469,9 @@ var
   packet: TGrpcPacket;
 begin
   if IsRequestClosed then
-    Assert(false, 'Cannot send: request already closed');
+    Assert(False, 'Cannot send: request already closed');
   if IsResponseClosed then
-    Assert(false, 'Cannot send: response already closed');
+    Assert(False, 'Cannot send: response already closed');
 
   try
     TGrpcUtil.CheckGrpcResponse(FRequest.ResponseHeaders);
@@ -594,8 +599,7 @@ begin
   session := FHttp2.Connect();
   packet.Create(aSendData);
   request := session.GetOrCreateStream(-1);
-  request.TimeRequestBegin := now;
-  request.Timeout := TimeoutInSeconds;
+  request.TimeoutEnd := TimeoutInSeconds;
   request.IsUnary := True;
 
   if Assigned(aReceiveCallback) then
@@ -624,6 +628,46 @@ begin
     if not CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders) then
       Result := TGrpcHttp2Stream.Create(request);
   end;
+end;
+
+procedure TGrpcHttp2Client.DoUnaryRequestAsyncEx(const aSendData: TBytes;
+  const aGrpcPath: string; const aReceiveCallback: TGrpcCallbackEx;
+  const TimeoutInSeconds: UInt64);
+var
+  packet: TGrpcPacket;
+  session: TSessionContext;
+  request: TStreamRequest;
+begin
+  session := FHttp2.Connect();
+  packet.Create(aSendData);
+  request := session.GetOrCreateStream(-1);
+  request.TimeoutEnd := TimeoutInSeconds;
+  request.IsUnary := True;
+
+  if Assigned(aReceiveCallback) then
+  begin
+    request.OnFrameReceived :=
+      procedure(const aStream: TStreamRequest; out aHandled: Boolean)
+      var
+        packet: TGrpcPacket;
+      begin
+        if CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders) then
+          Exit;
+        while packet.TryDeserialize(request.ResponseBuffer) or aStream.IsResponseClosed do
+        begin
+          aReceiveCallback(packet, aStream.IsResponseClosed);
+          aHandled := True;
+          if packet.Data = nil then
+            Break;
+        end;
+      end;
+  end;
+
+  request.RequestHeaders.AddOrSet('content-type', 'application/grpc');
+  request.RequestHeaders.AddOrSet('user-agent', 'grpc-delphi/0.1.0-dev');
+
+  if request.DoRequest('POST', aGrpcPath, packet.Serialize, FConnectTimeout, FReceiveTimeout, True) then
+    CheckErrorAndCallback(aGrpcPath, request.ResponseHeaders);
 end;
 
 function TGrpcHttp2Client.CheckErrorAndCallback(const aRequestPath: string; aHeaders: TgoHttpHeaders2): Boolean;
