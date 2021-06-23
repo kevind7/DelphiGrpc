@@ -225,11 +225,17 @@ type
     nghttp2_session_set_stream_user_data: function(session: pnghttp2_session;
       stream_id: int32; stream_user_data: Pointer): Int32; cdecl;
 
+    nghttp2_priority_spec_init: procedure(pri_spec: pnghttp2_priority_spec; stream_id: int32; weight: int32; exclusive: integer); cdecl;
+
+    nghttp2_session_get_next_stream_id: function (session: pnghttp2_session): uint32; cdecl;
+
     nghttp2_session_mem_recv: function(session: pnghttp2_session; const &in: Pointer; const inlen: size_t): Integer; cdecl;
 
     nghttp2_session_mem_send: function(session: pnghttp2_session; out data_ptr: Pointer): Integer; cdecl;
 
     nghttp2_session_want_read: function(session: pnghttp2_session): Integer; cdecl;
+
+    nghttp2_session_change_stream_priority: function(session: pnghttp2_session; stream_id: int32; pri_spec: pnghttp2_priority_spec): Integer; cdecl;
 
     nghttp2_session_want_write: function(session: pnghttp2_session): Integer; cdecl;
 
@@ -333,7 +339,10 @@ begin
     nghttp2_submit_request := GetProcAddress(fLibHandle, 'nghttp2_submit_request');
     nghttp2_session_get_stream_user_data := GetProcAddress(fLibHandle, 'nghttp2_session_get_stream_user_data');
     nghttp2_session_set_stream_user_data := GetProcAddress(fLibHandle, 'nghttp2_session_set_stream_user_data');
+    nghttp2_priority_spec_init := GetProcAddress(fLibHandle, 'nghttp2_priority_spec_init');
+    nghttp2_session_get_next_stream_id := GetProcAddress(fLibHandle, 'nghttp2_session_get_next_stream_id');
     nghttp2_submit_response := GetProcAddress(fLibHandle, 'nghttp2_submit_response');
+    nghttp2_session_change_stream_priority := GetProcAddress(fLibHandle, 'nghttp2_session_change_stream_priority');
     nghttp2_session_mem_recv := GetProcAddress(fLibHandle, 'nghttp2_session_mem_recv');
     nghttp2_session_mem_send := GetProcAddress(fLibHandle, 'nghttp2_session_mem_send');
     nghttp2_session_want_read := GetProcAddress(fLibHandle, 'nghttp2_session_want_read');
@@ -361,7 +370,10 @@ begin
     (@nghttp2_submit_request = nil) or
     (@nghttp2_session_get_stream_user_data = nil) or
     (@nghttp2_session_set_stream_user_data = nil) or
+    (@nghttp2_priority_spec_init = nil) or
+    (@nghttp2_session_get_next_stream_id = nil) or
     (@nghttp2_submit_response = nil) or
+    (@nghttp2_session_change_stream_priority = nil) or
     (@nghttp2_session_mem_recv = nil) or
     (@nghttp2_session_mem_send = nil) or
     (@nghttp2_session_want_read = nil) or

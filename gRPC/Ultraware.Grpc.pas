@@ -56,6 +56,7 @@ type
   IGrpcStream = interface
     ['{B16B08D9-E5E6-4812-A6E2-09E8D1377B96}']
     procedure SendData(const aData: TBytes; aClose: Boolean = False);
+    procedure SendDataEx(const aData: TBytes; aClose: Boolean = False);
     function  CloseAndRecvData(out aResult: TBytes): Boolean;
     function  Recv(out aResult: TBytes; aWaitTimeout: Integer = TIMEOUT_RECV): TGrpcWaitResult;
     procedure DoCloseSend();
@@ -76,6 +77,7 @@ type
     procedure SendCloseStream();
     procedure DoCloseSend();
     procedure SendData(const aData: TBytes; aClose: Boolean = False);
+    procedure SendDataEx(const aData: TBytes; aClose: Boolean = False);
 
     function  IsResponseClosed: Boolean;
     function  IsRequestClosed: Boolean;
@@ -477,7 +479,30 @@ begin
     TGrpcUtil.CheckGrpcResponse(FRequest.ResponseHeaders);
 
     packet.Create(aData);
+
     FRequest.SendRequestData(packet.Serialize, aClose);
+
+    TGrpcUtil.CheckGrpcResponse(FRequest.ResponseHeaders);
+  except
+    FRequest.CloseRequest;
+    raise;
+  end;
+end;
+
+procedure TGrpcHttp2Stream.SendDataEx(const aData: TBytes; aClose: Boolean);
+var
+  packet: TGrpcPacket;
+begin
+  if IsRequestClosed then
+    Assert(False, 'Cannot send: request already closed');
+  if IsResponseClosed then
+    Assert(False, 'Cannot send: response already closed');
+
+  try
+    TGrpcUtil.CheckGrpcResponse(FRequest.ResponseHeaders);
+
+    packet.Create(aData);
+    FRequest.SendRequestDataEx(packet.Serialize, aClose);
 
     TGrpcUtil.CheckGrpcResponse(FRequest.ResponseHeaders);
   except
