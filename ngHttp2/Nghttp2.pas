@@ -55,7 +55,9 @@ const
   NGHTTP2_HCAT_PUSH_RESPONSE = 2;
   NGHTTP2_HCAT_HEADERS = 3;
   NGHTTP2_NV_FLAG_NONE = 0;
-  NGHTTP2_NV_FLAG_NO_INDEX = 1;  NGHTTP2_NV_FLAG_NO_COPY_NAME = 2;  NGHTTP2_NV_FLAG_NO_COPY_VALUE = 4;
+  NGHTTP2_NV_FLAG_NO_INDEX = 1;
+  NGHTTP2_NV_FLAG_NO_COPY_NAME = 2;
+  NGHTTP2_NV_FLAG_NO_COPY_VALUE = 4;
   NGHTTP2_SETTINGS_ENABLE_PUSH = 2;
   NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS = 3;
   NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE = 4;
@@ -63,6 +65,7 @@ const
   NGHTTP2_SETTINGS_MAX_HEADER_LIST_SIZE = 6;
 
   NGHTTP2_FLAG_NONE = 0;
+  NGHTTP2_FLAG_END_STREAM = 1;
 
   NGHTTP2_DATA_FLAG_NONE = 0;
   NGHTTP2_DATA_FLAG_EOF = 1;
@@ -161,6 +164,9 @@ type
   nghttp2_on_begin_headers_callback = function(session: pnghttp2_session;
     const frame: pnghttp2_frame; user_data: Pointer): Integer; cdecl;
 
+  nghttp2_on_before_frame_send_callback = function(session: pnghttp2_session;
+    const frame: pnghttp2_frame; user_data: Pointer): Integer; cdecl;
+
   nghttp2_on_frame_recv_callback = function(session: pnghttp2_session;
     const frame: pnghttp2_frame; user_data: Pointer): Integer; cdecl;
 
@@ -195,6 +201,9 @@ type
 
     nghttp2_session_callbacks_set_on_begin_headers_callback: procedure(callbacks: pnghttp2_session_callbacks;
       on_header_callback: nghttp2_on_begin_headers_callback); cdecl;
+
+    nghttp2_session_callbacks_set_before_frame_send_callback: procedure(callbacks: pnghttp2_session_callbacks;
+      on_before_frame_send_callback: nghttp2_on_before_frame_send_callback); cdecl;
 
     nghttp2_session_callbacks_set_on_header_callback: procedure(callbacks: pnghttp2_session_callbacks;
       on_header_callback: nghttp2_on_header_callback); cdecl;
@@ -330,6 +339,7 @@ begin
     nghttp2_session_callbacks_new := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_new');
     nghttp2_session_callbacks_del := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_del');
     nghttp2_session_callbacks_set_on_header_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_on_header_callback');
+    nghttp2_session_callbacks_set_before_frame_send_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_before_frame_send_callback');
     nghttp2_session_callbacks_set_on_begin_headers_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_on_begin_headers_callback');
     nghttp2_session_callbacks_set_on_frame_send_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_on_frame_send_callback');
     nghttp2_session_callbacks_set_on_frame_recv_callback := GetProcAddress(fLibHandle, 'nghttp2_session_callbacks_set_on_frame_recv_callback');
@@ -360,6 +370,7 @@ begin
     (@nghttp2_session_del = nil) or
     (@nghttp2_session_callbacks_new = nil) or
     (@nghttp2_session_callbacks_del = nil) or
+    (@nghttp2_session_callbacks_set_before_frame_send_callback = nil) or
     (@nghttp2_session_callbacks_set_on_header_callback = nil) or
     (@nghttp2_session_callbacks_set_on_begin_headers_callback = nil) or
     (@nghttp2_session_callbacks_set_on_frame_send_callback = nil) or
