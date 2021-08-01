@@ -51,6 +51,7 @@ type
   TStreamRequest = class;
 
   TStreamNotify = procedure(const aStream: TStreamRequest; out aHandled: Boolean) of object;
+  TStreamCleanup = procedure(pStreamRequest: TStreamRequest) of object;
   TStreamCallback = reference to procedure(const aStream: TStreamRequest; out aHandled: Boolean);
 
   { Http headers class }
@@ -100,7 +101,6 @@ type
   TgoHttp2Client = class(TgoHttp2Base)
   private
     FSession: TSessionContext;
-
     { Http request }
     FAuthorization: String;
     FUserName: String;
@@ -114,17 +114,12 @@ type
     function GetOrCreateSession: TSessionContext;
   public
     function Connect(const AConnectTimeout: Integer = TIMEOUT_CONNECT): TSessionContext;
+    procedure ConnectAsync(pOnConnect, pOnConnectTimeout: TProc; const AConnectTimeout: Integer = 10);
 
     { Get method }
     function Get(const AURL: String; out AResponse: TBytes;
       const AConnectTimeout: Integer = TIMEOUT_CONNECT;
       const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Get(const AURL: String; out AResponse: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Get(const AURL: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): String; overload;
 
     { Head method }
     function Head(const AURL: String;
@@ -135,45 +130,21 @@ type
     function Post(const APath: String; const ARequest: TBytes;
       const AConnectTimeout: Integer = TIMEOUT_CONNECT;
       const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Post(const AURL: String; out AResponse: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Post(const AURL: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): String; overload;
 
     { Put method }
     function Put(const AURL: String; out AResponse: TBytes;
       const AConnectTimeout: Integer = TIMEOUT_CONNECT;
       const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Put(const AURL: String; out AResponse: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Put(const AURL: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): String; overload;
 
     { Delete method }
     function Delete(const AURL: String; out AResponse: TBytes;
       const AConnectTimeout: Integer = TIMEOUT_CONNECT;
       const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Delete(const AURL: String; out AResponse: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Delete(const AURL: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): String; overload;
 
     { Options method }
     function Options(const AURL: String; out AResponse: TBytes;
       const AConnectTimeout: Integer = TIMEOUT_CONNECT;
       const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Options(const AURL: String; out AResponse: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): Boolean; overload;
-//    function Options(const AURL: String;
-//      const AConnectTimeout: Integer = TIMEOUT_CONNECT;
-//      const ARecvTimeout: Integer = TIMEOUT_RECV): String; overload;
   public
     constructor Create(const aRemoteAddress: string = '127.0.0.1'; aRemotePort: Integer = 12345; aSSL: Boolean = false); override;
     destructor  Destroy; override;
@@ -234,6 +205,7 @@ type
 //    property OnRecv: TOnRecv read FOnRecv write FOnRecv;
 
     { Username and password for Basic Authentication }
+    property Session: TSessionContext read FSession;
     property UserName: String read FUserName write FUserName;
     property Password: String read FPassword write FPassword;
 
@@ -256,6 +228,8 @@ type
     property PrivateKey: TBytes read FPrivateKey write FPrivateKey;
   end;
 
+  TSessionState = (Disconnected, Connecting, Connected);
+
   TSessionContext = class
   private
     function nghttp2_on_data_chunk_recv_callback(session: pnghttp2_session; flags: uint8; stream_id: int32;
@@ -264,7 +238,6 @@ type
       user_data: Pointer): Integer;
     function nghttp2_on_frame_recv_callback(session: pnghttp2_session; const frame: pnghttp2_frame;
       user_data: Pointer): Integer;
-
     function nghttp2_on_header_callback(session: pnghttp2_session;
       const frame: pnghttp2_frame; const name: puint8; namelen: size_t;
       const value: puint8; valuelen: size_t; flags: uint8;
@@ -272,21 +245,31 @@ type
   private
     FHttpOwner: TgoHttp2Base;
     FConnection: TgoSocketConnection;
+    FState: TSessionState;
+
     FOnStreamReceived: TStreamNotify;
+    FOnSessionConnected: TProc;
+    FOnSessionConnectedTimeout: TProc;
+
     FConnected: TEvent;
     FPendingSendCount: Integer;
+    FConnectionTimeoutCounter: Integer;
+    FConnectionTimeoutLimit: Integer;
 
-    FTimerOut: TTimer;
+    FConnectionTimeout: TTimer;
+    FStreamsTimerOut: TTimer;
 
-    procedure OnTimeouts(pSender: TObject);
+    procedure OnConnectionTimeout(pSender: TObject);
+    procedure OnStreamsTimeouts(pSender: TObject);
     procedure OnSocketConnected;
     procedure OnSocketDisconnected;
-
     procedure OnSocketRecv(const ABuffer: Pointer; const ASize: Integer);
     function OnFrameReceived(session: pnghttp2_session; session_data: TSessionContext;
       stream_data: TStreamRequest): Integer;
 
     procedure HandleListNotify(Sender: TObject; const Item: TStreamRequest; Action: TCollectionNotification);
+
+    procedure ResetTimeout;
 
     function Send404Response(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
     function SubmitResponse(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
@@ -305,6 +288,7 @@ type
     function nghttp2_Send: Boolean;
   protected
     function  Connect(const AConnectTimeout: Integer): Boolean;
+    procedure ConnectAsync(pOnConnect, pOnConnectTimeout: TProc; const AConnectTimeout: Integer);
     procedure AddStream(aStream: TStreamRequest);
   public
     constructor Create(aOwner: TgoHttp2Base; aConnection: TgoSocketConnection; aCallback: pnghttp2_session_callbacks);
@@ -318,7 +302,10 @@ type
     procedure HandleValueNotify(pSender: TObject; const pItem: Grijjy.Http2.TStreamRequest; pAction: TCollectionNotification);
     procedure RemoveStream(pStreamRequest: TStreamRequest);
 
+    property OnSessionConnected: TProc read FOnSessionConnected write FOnSessionConnected;
+    property OnSessionConnectedTimeout: TProc read FOnSessionConnectedTimeout write FOnSessionConnectedTimeout;
     property OnStreamFrameReceived: TStreamNotify read FOnStreamReceived write FOnStreamReceived;
+    property State: TSessionState read FState;
     property SSL: Boolean read GetSSL;
     property Session_http2: pnghttp2_session read FSession_http2;
   end;
@@ -389,12 +376,15 @@ type
     FTimeOutBegin, FTimeoutEnd: UInt64;
 
     FOnFrameReceived: TStreamCallback;
+    FRemoveSelfFromContext: TStreamCleanup;
+    FOnStreamClose: TProc;
+    FOnTimeout: TProc<Integer>;
+
     FRequestThread: IRequestThread;
     FOnDestroy: TNotifyEvent;
     procedure CreateRequest;
     function  SendRequest: Boolean;
   public
-    fRemoveSelfFromContext: procedure(pStreamRequest: TStreamRequest) of object;
     constructor Create(aContext: TSessionContext; aStreamID: Integer); overload;
     constructor Create(aContext: TSessionContext; aPath: string); overload;
     procedure   AfterConstruction; override;
@@ -404,7 +394,6 @@ type
       const ARequest: TBytes; const AConnectTimeout, ARecvTimeout: Integer; aCloseRequest: Boolean): Boolean;
 
     procedure SendRequestData(const aData: TBytes; aClose: Boolean);
-    procedure SendRequestDataEx(const aData: TBytes; aClose: Boolean);
     procedure SendResponseData(const aData: TBytes; aClose: Boolean);
     procedure SendErrorResponse(const aException: Exception);
     function  IsRequestEOF: Boolean;
@@ -429,6 +418,9 @@ type
 
     property RequestThread: IRequestThread read FRequestThread write FRequestThread;
     property OnFrameReceived: TStreamCallback read FOnFrameReceived write FOnFrameReceived;
+    property RemoveSelfFromContext: TStreamCleanup read FRemoveSelfFromContext write FRemoveSelfFromContext;
+    property OnStreamClose: TProc read FOnStreamClose write FOnStreamClose;
+    property OnTimeout: TProc<Integer> read FOnTimeout write FOnTimeout;
     property OnDestroy: TNotifyEvent read FOnDestroy write FOnDestroy;
     property TimeoutBegin: UInt64 read FTimeOutBegin write FTimeOutBegin;
     property TimeoutEnd: UInt64 read FTimeoutEnd write FTimeoutEnd;
@@ -540,12 +532,7 @@ begin
   else
     Result := len;
 
-  OutputDebug(Format('[ds.response.rc] size %d || stream_id is %d || data_flags^ is %d', [stream.ResponseBuffer.Size, stream.StreamID ,data_flags^]));
-
   stream.ResponseBuffer.Read(buf, Result);
-  {$IFDEF LOGGING}
-  OutputDebug(Format('%s: response output: id = %d, len = %d, flags = %d',[formatdatetime('hh:nn:ss:zzz', now), stream_id, Result, Integer(data_flags)]));
-  {$ENDIF}
 end;
 
 function data_source_submit_data_read_callback(session: pnghttp2_session;
@@ -556,16 +543,11 @@ var
   ctx: TSessionContext;
 begin
   ctx := TObject(user_data) as TSessionContext;
-  // We should actually use this function "nghttp2_session_get_stream_user_data" to get stream so we can read it's buffer!
-  stream := TObject(source.ptr) as TStreamRequest; //TObject(TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, stream_id)) as TStreamRequest;
-
-  OutputDebug(Format('stream_id: %d || stream.FStreamID: %d', [stream_id, stream.FStreamID]));
-  OutputDebug(Format('len is: %d || stream.RequestBuffer.size: %d', [len, stream.RequestBuffer.Size]));
+  stream := TObject(source.ptr) as TStreamRequest;
 
   if stream = nil then
   begin
     data_flags^ := data_flags^ or NGHTTP2_DATA_FLAG_EOF;
-    OutputDebug(Format('Exit here || data_flags is %d', [data_flags^]));
     Exit(0);
   end;
 
@@ -580,12 +562,7 @@ begin
   else
     Result := len;
 
-  OutputDebug(Format('[ds.submit_data.rc] size is %d || stream_id is %d || data_flags^ is %d', [stream.RequestBuffer.Size, stream.StreamID ,data_flags^]));
-
   stream.RequestBuffer.Read(buf, Result);
-  {$IFDEF LOGGING}
-  OutputDebug(Format('request output: id = %d, len = %d, flags = %d',[stream_id, Result, Integer(data_flags)]));
-  {$ENDIF}
 end;
 
 function data_source_request_read_callback(session: pnghttp2_session;
@@ -596,16 +573,11 @@ var
   ctx: TSessionContext;
 begin
   ctx := TObject(user_data) as TSessionContext;
-  // We should actually use this function "nghttp2_session_get_stream_user_data" to get stream so we can read it's buffer!
-  stream := TObject(source.ptr) as TStreamRequest; //TObject(TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, stream_id)) as TStreamRequest;
-
-  OutputDebug(Format('stream_id: %d || stream.FStreamID: %d', [stream_id, stream.FStreamID]));
-  OutputDebug(Format('len is: %d || stream.RequestBuffer.size: %d', [len, stream.RequestBuffer.Size]));
+  stream := TObject(source.ptr) as TStreamRequest;
 
   if stream = nil then
   begin
     data_flags^ := data_flags^ or NGHTTP2_DATA_FLAG_EOF;
-    OutputDebug(Format('Exit here || data_flags is %d', [data_flags^]));
     Exit(0);
   end;
 
@@ -613,19 +585,16 @@ begin
   begin
     Result := stream.RequestBuffer.Size;
     if not stream.FPendingRequest then
-      data_flags^ := data_flags^ or NGHTTP2_DATA_FLAG_EOF
+    begin
+      data_flags^ := data_flags^ or NGHTTP2_DATA_FLAG_EOF;
+    end
     else if Result = 0 then
       TInterlocked.Decrement(ctx.FPendingSendCount);
   end
   else
     Result := len;
 
-  OutputDebug(Format('[ds.request.rc] size is %d || stream_id is %d || data_flags^ is %d', [stream.RequestBuffer.Size, stream.StreamID ,data_flags^]));
-
   stream.RequestBuffer.Read(buf, Result);
-  {$IFDEF LOGGING}
-  OutputDebug(Format('request output: id = %d, len = %d, flags = %d',[stream_id, Result, Integer(data_flags)]));
-  {$ENDIF}
 end;
 
 { TgoHttpHeaders2 }
@@ -694,6 +663,15 @@ begin
   Result.Connect(AConnectTimeout);
 end;
 
+procedure TgoHttp2Client.ConnectAsync(pOnConnect, pOnConnectTimeout: TProc;
+  const AConnectTimeout: Integer);
+var
+  FSession: TSessionContext;
+begin
+  FSession := GetOrCreateSession;
+  FSession.ConnectAsync(pOnConnect, pOnConnectTimeout, AConnectTimeout);
+end;
+
 function TgoHttp2Client.GetOrCreateSession: TSessionContext;
 var
   connection: TgoSocketConnection;
@@ -701,7 +679,7 @@ begin
   if FSession <> nil then
   begin
     if (FSession.FConnection = nil) or FSession.FConnection.Shutdown then
-      FreeAndNil(FSession);             //todo: make this threadsafe?
+      FreeAndNil(FSession);             //todo: make this threadsafe? Use locks?
   end;
 
   if FSession = nil then
@@ -743,28 +721,6 @@ begin
   Result := DoRequest('GET', AURL, AResponse, AConnectTimeout, ARecvTimeout);
 end;
 
-//function TgoHttp2Client.Get(const AURL: String; out AResponse: String;
-//  const AConnectTimeout, ARecvTimeout: Integer): Boolean;
-//var
-//  Response: TBytes;
-//begin
-//  if Get(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//  begin
-//    AResponse := BytesToString(Response, FResponseContentCharset);
-//    Result := True;
-//  end
-//  else
-//    Result := False;
-//end;
-
-//function TgoHttp2Client.Get(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): String;
-//var
-//  Response: TBytes;
-//begin
-//  if Get(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//    Result := BytesToString(Response, FResponseContentCharset);
-//end;
-
 function TgoHttp2Client.Head(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): Boolean;
 var
   AResponse: TBytes;
@@ -778,55 +734,11 @@ begin
   Result := DoRequest('POST', APath, ARequest, AConnectTimeout, ARecvTimeout);
 end;
 
-//function TgoHttp2Client.Post(const AURL: String; out AResponse: String;
-//  const AConnectTimeout, ARecvTimeout: Integer): Boolean;
-//var
-//  Response: TBytes;
-//begin
-//  if Post(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//  begin
-//    AResponse := BytesToString(Response, FResponseContentCharset);
-//    Result := True;
-//  end
-//  else
-//    Result := False;
-//end;
-//
-//function TgoHttp2Client.Post(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): String;
-//var
-//  Response: TBytes;
-//begin
-//  if Post(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//    Result := BytesToString(Response, FResponseContentCharset);
-//end;
-
 function TgoHttp2Client.Put(const AURL: String; out AResponse: TBytes;
   const AConnectTimeout, ARecvTimeout: Integer): Boolean;
 begin
   Result := DoRequest('PUT', AURL, AResponse, AConnectTimeout, ARecvTimeout);
 end;
-
-//function TgoHttp2Client.Put(const AURL: String; out AResponse: String;
-//  const AConnectTimeout, ARecvTimeout: Integer): Boolean;
-//var
-//  Response: TBytes;
-//begin
-//  if Put(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//  begin
-//    AResponse := BytesToString(Response, FResponseContentCharset);
-//    Result := True;
-//  end
-//  else
-//    Result := False;
-//end;
-//
-//function TgoHttp2Client.Put(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): String;
-//var
-//  Response: TBytes;
-//begin
-//  if Put(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//    Result := BytesToString(Response, FResponseContentCharset);
-//end;
 
 function TgoHttp2Client.Delete(const AURL: String; out AResponse: TBytes;
   const AConnectTimeout, ARecvTimeout: Integer): Boolean;
@@ -834,58 +746,13 @@ begin
   Result := DoRequest('DELETE', AURL, AResponse, AConnectTimeout, ARecvTimeout);
 end;
 
-//function TgoHttp2Client.Delete(const AURL: String; out AResponse: String;
-//  const AConnectTimeout, ARecvTimeout: Integer): Boolean;
-//var
-//  Response: TBytes;
-//begin
-//  if Delete(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//  begin
-//    AResponse := BytesToString(Response, FResponseContentCharset);
-//    Result := True;
-//  end
-//  else
-//    Result := False;
-//end;
-//
-//function TgoHttp2Client.Delete(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): String;
-//var
-//  Response: TBytes;
-//begin
-//  if Delete(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//    Result := BytesToString(Response, FResponseContentCharset);
-//end;
-
 function TgoHttp2Client.Options(const AURL: String; out AResponse: TBytes;
   const AConnectTimeout, ARecvTimeout: Integer): Boolean;
 begin
   Result := DoRequest('OPTIONS', AURL, AResponse, AConnectTimeout, ARecvTimeout);
 end;
 
-//function TgoHttp2Client.Options(const AURL: String; out AResponse: String;
-//  const AConnectTimeout, ARecvTimeout: Integer): Boolean;
-//var
-//  Response: TBytes;
-//begin
-//  if Options(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//  begin
-//    AResponse := BytesToString(Response, FResponseContentCharset);
-//    Result := True;
-//  end
-//  else
-//    Result := False;
-//end;
-//
-//function TgoHttp2Client.Options(const AURL: String; const AConnectTimeout, ARecvTimeout: Integer): String;
-//var
-//  Response: TBytes;
-//begin
-//  if Options(AURL, Response, AConnectTimeout, ARecvTimeout) then
-//    Result := BytesToString(Response, FResponseContentCharset);
-//end;
-
 { TgoHttpServer }
-
 
 constructor TgoHttp2Server.Create(const aBindAddress: string; aBindPort: Integer; aSSL: Boolean);
 
@@ -952,9 +819,11 @@ begin
 end;
 
 procedure TgoHttp2Server.OnSocketAccepted(aConnection: TgoSocketConnection);
-var session: TSessionContext;
+var
+  session: TSessionContext;
 begin
   session := TSessionContext.Create(Self, aConnection, FCallbacks_http2);
+
   System.TMonitor.Enter(FSessions);
   try
     FSessions.Add(session);
@@ -1020,10 +889,6 @@ function TSessionContext.Connect(const AConnectTimeout: Integer): Boolean;
 var
   connection: TgoSocketConnection;
 begin
-  {$IFDEF LOGGING}
-  //grLog('Connecting');
-  {$ENDIF}
-
   if IsConnected then
     Exit(True);
 
@@ -1050,14 +915,52 @@ begin
 
   FConnected.ResetEvent;
   FConnection.Connect(False{no nagle});
+  FState := TSessionState.Connecting;
   Result := FConnected.WaitFor(AConnectTimeout) <> wrTimeout;
 
   if IsConnected then
     Exit(True);
+end;
 
-  {$IFDEF LOGGING}
-  //grLog('Connected', Result);
-  {$ENDIF}
+procedure TSessionContext.ConnectAsync(pOnConnect, pOnConnectTimeout: TProc; const AConnectTimeout: Integer);
+var
+  connection: TgoSocketConnection;
+begin
+  if IsConnected then
+    Exit;
+
+  if State in [TSessionState.Connecting, TSessionState.Connected] then
+    Exit;
+
+  FConnectionTimeoutLimit := AConnectTimeout;
+  OnSessionConnected := pOnConnect;
+  OnSessionConnectedTimeout := pOnConnectTimeout;
+
+  if FConnection.Shutdown then
+  begin
+    connection := TgoSocketConnection.Create(HttpClientSocketManager, FConnection.Hostname, FConnection.Port);
+    FConnection.Free;
+    FConnection := connection;
+    FConnection.OnConnected := Self.OnSocketConnected;
+    FConnection.OnDisconnected := Self.OnSocketDisconnected;
+    FConnection.OnRecv := Self.OnSocketRecv;
+  end;
+
+  if SSL then
+  begin
+    FConnection.SSL  := True;
+    FConnection.ALPN := True;
+
+    if FHttpOwner.FCertificate <> nil then
+      FConnection.Certificate := FHttpOwner.FCertificate;
+    if FHttpOwner.FPrivateKey <> nil then
+      FConnection.PrivateKey := FHttpOwner.FPrivateKey;
+  end;
+
+  FConnected.ResetEvent;
+  FState := TSessionState.Connecting;
+  FConnection.Connect(False);
+  FConnectionTimeout.Enabled := True;
 end;
 
 constructor TSessionContext.Create(aOwner: TgoHttp2Base; aConnection: TgoSocketConnection; aCallback: pnghttp2_session_callbacks);
@@ -1070,12 +973,19 @@ begin
   FConnection.OnConnected := Self.OnSocketConnected;
   FConnection.OnDisconnected := Self.OnSocketDisconnected;
   FConnection.OnRecv := Self.OnSocketRecv;
+  FState := TSessionState.Disconnected;
+  FConnectionTimeoutCounter := 0;
   FCallbacks_http2 := aCallback;
 
-  FTimerOut := TTimer.Create(nil);
-  FTimerOut.Interval := 1000;
-  FTimerOut.Enabled := True;
-  FTimerOut.OnTimer := OnTimeouts;
+  FStreamsTimerOut := TTimer.Create(nil);
+  FStreamsTimerOut.Interval := 1000;
+  FStreamsTimerOut.Enabled := False;
+  FStreamsTimerOut.OnTimer := OnStreamsTimeouts;
+
+  FConnectionTimeout := TTimer.Create(nil);
+  FConnectionTimeout.Interval := 1000;
+  FConnectionTimeout.Enabled := False;
+  FConnectionTimeout.OnTimer := OnConnectionTimeout;
 
   FStreams := TObjectDictionary<Integer, TStreamRequest>.Create;
   FStreams.OnValueNotify := HandleValueNotify;
@@ -1126,16 +1036,17 @@ end;
 
 destructor TSessionContext.Destroy;
 begin
-  FTimerOut.Free;
+  FStreamsTimerOut.Free;
+  FConnectionTimeout.Free;
   FStreams.Free;
   FUnaryStreams.Free;
   TNGHTTP2.GetInstance.nghttp2_option_del(FOptions_http2);
-  //get last_proc_stream_id
-  //submit_goaway (graceful shutdown)
   TNGHTTP2.GetInstance.nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
   TNGHTTP2.GetInstance.nghttp2_session_del(FSession_http2);
   Disconnect;
   FConnected.Free;
+  FOnSessionConnected := nil;
+  FOnSessionConnectedTimeout := nil;
   inherited;
 end;
 
@@ -1146,7 +1057,8 @@ begin
     System.TMonitor.Enter(Self);
     try
       HttpClientSocketManager.Release(Self.FConnection);
-      Self.FConnection := nil;
+      FConnection := nil;
+      FState := TSessionState.Disconnected;
     finally
       System.TMonitor.Exit(Self);
     end;
@@ -1169,8 +1081,6 @@ begin
     iLoop := TNGHTTP2.GetInstance.nghttp2_session_want_write(FSession_http2);
     TInterlocked.Increment(Self.FPendingSendCount);
 
-    OutputDebug(Format('[OL] Session_Want_Write is %d', [iLoop]));
-
     //see data_source_response_read_callback
     while TNGHTTP2.GetInstance.nghttp2_session_want_write(FSession_http2) > 0 do
     begin
@@ -1178,9 +1088,6 @@ begin
 
       if (len > 0) then
       begin
-
-        OutputDebug(Format('[IL] iLoop [%d] | Session_Men_Send is %d', [iLoop, len]));
-
         SetLength(bytes, len);
         Move(data^, bytes[0], len);
 
@@ -1195,9 +1102,6 @@ begin
         end
         else if FConnection.Send(bytes) then
         begin
-
-          OutputDebug(Format('[IL] iLoop [%d] | bytes length is %d', [iLoop, Length(bytes)]));
-
           Result := True;
         end
         else
@@ -1207,9 +1111,6 @@ begin
       end
       else
       begin
-
-        OutputDebug(Format('[IL] iLoop [%d] | Session_Men_Send was %d', [iLoop, len]));
-
         // there can be more than one stream without EOF (not closed yet), so countdown till we have had all streams (and not infinite loop!)
         dec(iLoop);
         if iLoop < 0 then
@@ -1230,9 +1131,6 @@ function TSessionContext.nghttp2_on_data_chunk_recv_callback(session: pnghttp2_s
 var
   stream: TStreamRequest;
 begin
-  {$IFDEF LOGGING}
-  OutputDebug(Format('stream chunck received: id = %d, len = %d, flags = %d',[stream_id, len, flags]));
-  {$ENDIF}
   stream := GetOrCreateStream(stream_id);
 
   {$IFDEF LOGGING}
@@ -1250,15 +1148,12 @@ function TSessionContext.nghttp2_on_stream_close_callback(session: pnghttp2_sess
 var
   stream: TStreamRequest;
 begin
-  {$IFDEF LOGGING}
-  OutputDebug(Format('stream closed: id = %d',[stream_id]));
-  {$ENDIF}
-
   stream := GetOrCreateStream(stream_id);
 
   {$IFDEF LOGGING}
   //grLog('on_stream_close_callback ' + stream_id.ToString);
   {$ENDIF}
+
   if IsServerContext then
     stream.CloseRequest
   else
@@ -1267,8 +1162,12 @@ begin
 
   if stream.ResponseBuffer.Size > 0 then
     Result := OnFrameReceived(session, Self, stream);
-  stream.fRemoveSelfFromContext(stream);
-  OutputDebug(Format('stream deleted of id %d', [stream.StreamID]));
+
+  if Assigned(stream.OnStreamClose) then
+    stream.OnStreamClose();
+  if Assigned(stream.RemoveSelfFromContext) then
+    stream.RemoveSelfFromContext(stream);
+
   { Note : connection is still open at this point unless you call
     nghttp2_session_terminate_session(session, NGHTTP2_NO_ERROR) }
 end;
@@ -1281,10 +1180,6 @@ var
 begin
   Result := 0;
   context := TObject(user_data) as TSessionContext;
-  {$IFDEF LOGGING}
-  //grLog('on_frame_recv_callback');
-  OutputDebug(Format('frame received: id = %d, type = %d, flags = %d',[frame.hd.stream_id, frame.hd.&type, frame.hd.flags]));
-  {$ENDIF}
 
   case frame.hd.&type of
     NGHTTP2_DATA,
@@ -1295,9 +1190,6 @@ begin
       // For DATA and HEADERS frame, this callback may be called after on_stream_close_callback. Check that stream still alive. */
       if stream_data = nil then
       begin
-        {$IFDEF LOGGING}
-        OutputDebug(Format('frame received, but no stream object found: id = %d',[frame.hd.stream_id]));
-        {$ENDIF}
         Exit(0);
       end;
       //Golang sometimes sends an EOF on a HEADER
@@ -1329,12 +1221,6 @@ begin
   begin
     AName := TEncoding.ASCII.GetString(BytesOf(name, namelen));
     AValue := TEncoding.ASCII.GetString(BytesOf(value, valuelen));
-    {$IFDEF LOGGING}
-    OutputDebug(Format('header received: id = %d, cat = %d, flags = %d, %s = %s',[frame.hd.stream_id, frame.headers.cat, flags, AName, AValue]));
-    {$ENDIF}
-
-    OutputDebug(Format('header received: id = %d, cat = %d, flags = %d, %s = %s',[frame.hd.stream_id, frame.headers.cat, flags, AName, AValue]));
-
     if (frame.headers.cat = NGHTTP2_HCAT_RESPONSE) or (frame.headers.cat = NGHTTP2_HCAT_HEADERS) then
     begin
       stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
@@ -1358,6 +1244,18 @@ begin
   Result := 0;
 end;
 
+procedure TSessionContext.OnConnectionTimeout(pSender: TObject);
+begin
+  Inc(FConnectionTimeoutCounter);
+  if FConnectionTimeoutCounter >= FConnectionTimeoutLimit then
+  begin
+    ResetTimeout;
+    if Assigned(Self.OnSessionConnectedTimeout) then
+      Self.OnSessionConnectedTimeout();
+    Self.Disconnect;
+  end;
+end;
+
 function TSessionContext.OnFrameReceived(session: pnghttp2_session; session_data: TSessionContext; stream_data: TStreamRequest): Integer;
 var
   handled: Boolean;
@@ -1365,27 +1263,18 @@ begin
   Result := 0;
   handled := False;
   if Assigned(stream_data.OnFrameReceived) then
-  begin
-    {$IFDEF LOGGING}
-    OutputDebug(Format('Firing frame received event for stream object: id = %d',[stream_data.StreamID]));
-    {$ENDIF}
     stream_data.OnFrameReceived(stream_data, handled);
-  end;
 
   if not handled and Assigned(OnStreamFrameReceived) then
-  begin
-    {$IFDEF LOGGING}
-    OutputDebug(Format('Firing frame received event for session object',[]));
-    {$ENDIF}
     OnStreamFrameReceived(stream_data, handled);
-  end;
 
   if not handled and IsServerContext then
     Exit(Send404Response(session, stream_data));
 end;
 
 function TSessionContext.Send404Response(session: pnghttp2_session; stream_data: TStreamRequest): Integer;
-const ERROR_HTML = '<html><head><title>404</title></head>' + '<body><h1>404 Not Found</h1></body></html>';
+const
+  ERROR_HTML = '<html><head><title>404</title></head>' + '<body><h1>404 Not Found</h1></body></html>';
 var
   b: TBytes;
 begin
@@ -1426,23 +1315,18 @@ begin
 end;
 
 function TSessionContext.GetOrCreateStream(aStreamID: Integer): TStreamRequest;
-var
-  vString: string;
 begin
   System.TMonitor.Enter(FStreams);
-  vString := 'GetOrCreateStream called! | ';
   try
     if not FStreams.TryGetValue(aStreamID, Result) then
     begin
-      vString := vString + 'and created one';
       Result := TStreamRequest.Create(Self, aStreamID);
-      Result.fRemoveSelfFromContext := RemoveStream;
+      Result.RemoveSelfFromContext := RemoveStream;
       if aStreamID >= 0 then
         AddStream(Result);
     end;
   finally
     System.TMonitor.Exit(FStreams);
-    OutputDebug(vString);
   end;
 end;
 
@@ -1457,7 +1341,8 @@ begin
 end;
 
 function TSessionContext.IsRequestEOF: Boolean;
-var strm: TStreamRequest;
+var
+  strm: TStreamRequest;
 begin
   Result := True;
   System.TMonitor.Enter(FStreams);
@@ -1471,7 +1356,8 @@ begin
 end;
 
 function TSessionContext.IsResponseEOF: Boolean;
-var strm: TStreamRequest;
+var
+  strm: TStreamRequest;
 begin
   Result := True;
   System.TMonitor.Enter(FStreams);
@@ -1513,12 +1399,10 @@ end;
 procedure TSessionContext.HandleListNotify(Sender: TObject;
   const Item: TStreamRequest; Action: TCollectionNotification);
 begin
-  //DEBUG
-  Exit;
   if FUnaryStreams.Count = 0 then
-    FTimerOut.Enabled := False
+    FStreamsTimerOut.Enabled := False
   else
-    FTimerOut.Enabled := True;
+    FStreamsTimerOut.Enabled := True;
 end;
 
 procedure TSessionContext.HandleValueNotify(pSender: TObject;
@@ -1527,7 +1411,6 @@ begin
   if pAction in [TCollectionNotification.cnExtracting, TCollectionNotification.cnRemoved] then
     if pItem <> nil then
       pItem.Free;
-  //FStreams.TrimExcess; //Should lock this
 end;
 
 function TSessionContext.IsServerContext: Boolean;
@@ -1537,11 +1420,12 @@ end;
 
 procedure TSessionContext.OnSocketConnected;
 begin
-  {$IFDEF LOGGING}
-  //grLog('OnSocketConnected');
-  {$ENDIF}
+//  if Assigned(FOnSessionConnected) then
+//    FOnSessionConnected;
   if FConnected <> nil then
     FConnected.SetEvent;
+  FState := TSessionState.Connected;
+//  ResetTimeout;
 end;
 
 procedure TSessionContext.OnSocketDisconnected;
@@ -1550,13 +1434,10 @@ begin
   try
     HttpClientSocketManager.Release(Self.FConnection);
     Self.FConnection := nil;
+    FState := TSessionState.Disconnected;
   finally
     System.TMonitor.Exit(Self);
   end;
-  {$IFDEF LOGGING}
-  //grLog('OnSocketDisconnected');
-  {$ENDIF}
-  //FConnection.State := TgoConnectionState.Disconnected;
 end;
 
 { OnSocketRecv can be called by multiple threads from the socket pool in relation
@@ -1565,16 +1446,12 @@ end;
   into our main buffer in a thread safe manner, and we do it as quickly as possible. }
 procedure TSessionContext.OnSocketRecv(const ABuffer: Pointer; const ASize: Integer);
 begin
-  {$IFDEF LOGGING}
-  //grLog(Format('OnSocketRecv (ThreadId=%d, Size=%d)', [GetCurrentThreadId, ASize]), ABuffer, ASize);
-  {$ENDIF}
   TNGHTTP2.GetInstance.nghttp2_session_mem_recv(FSession_http2, ABuffer, ASize);
 end;
 
-procedure TSessionContext.OnTimeouts(pSender: TObject);
+procedure TSessionContext.OnStreamsTimeouts(pSender: TObject);
 var
   vStream: TStreamRequest;
-  vPair: TPair<integer, TStreamRequest>;
   vStreamCount: Integer;
 begin
   System.TMonitor.Enter(FUnaryStreams);
@@ -1591,7 +1468,7 @@ begin
         if vStream.TimeOutEnd = 0 then
         begin
           vStream.CloseRequestEx(NGHTTP2_REFUSED_STREAM);
-          vStream.fRemoveSelfFromContext(vStream);
+          vStream.RemoveSelfFromContext(vStream);
           Continue;
         end;
 
@@ -1609,8 +1486,10 @@ begin
 
         if vStream.TimeoutBegin >= (vStream.TimeOutEnd + 1) then
         begin
+          if Assigned(vStream.OnTimeout) then
+            vStream.OnTimeout(vStream.StreamID);
           vStream.CloseRequestEx(NGHTTP2_REFUSED_STREAM);
-          vStream.fRemoveSelfFromContext(vStream);
+          vStream.RemoveSelfFromContext(vStream);
         end;
       end;
   finally
@@ -1622,10 +1501,19 @@ procedure TSessionContext.RemoveStream(pStreamRequest: TStreamRequest);
 begin
   System.TMonitor.Enter(FStreams);
   System.TMonitor.Enter(FUnaryStreams);
+
   FUnaryStreams.Remove(pStreamRequest);
   FStreams.Remove(pStreamRequest.StreamID);
+
   System.TMonitor.Exit(FStreams);
   System.TMonitor.Exit(FUnaryStreams);
+end;
+
+procedure TSessionContext.ResetTimeout;
+begin
+  FConnectionTimeout.Enabled := False;
+  FConnectionTimeoutCounter := 0;
+  FConnectionTimeoutLimit := 0;
 end;
 
 { TStreamRequest }
@@ -1733,7 +1621,6 @@ begin
   FResponseHeaders.Free;
   FReqClosed.Free;
   FRespClosed.Free;
-
   inherited;
 end;
 
@@ -1754,10 +1641,7 @@ begin
   if Connect then
   begin
     FRequestBuffer.Write(ARequest);
-    if SendRequest then
-    begin
-      Result := True;  // Result := SendRequest ????
-    end;
+    Result := SendRequest;
   end;
   {$IFDEF LOGGING}
   //grLog('ResponseLength', Length(AResponse));
@@ -1768,7 +1652,6 @@ function TStreamRequest.SendRequest: Boolean;
 var
   headers: TArray<nghttp2_nv>;
   priority: nghttp2_priority_spec;
-//  vStreamID: uint32;
 begin
   {$IFDEF LOGGING}
   //grLog('SendRequest Thread', GetCurrentThreadId);
@@ -1782,23 +1665,14 @@ begin
 
     { create nghttp2 compatible headers }
     FInternalHeaders.AsNgHttp2Array(headers);
-    {$IFDEF LOGGING}
-    OutputDebug(Format('Internal headers: %s',[FInternalHeaders.AsString]));
-    {$ENDIF}
     FRequestHeaders.AsNgHttp2Array(headers);
-    {$IFDEF LOGGING}
-    OutputDebug(Format('Request headers: %s',[FRequestHeaders.AsString]));
-    {$ENDIF}
 
     { submit request }
     System.TMonitor.Enter(FContext);
     try
-      //vStreamID := TNGHTTP2.GetInstance.nghttp2_session_get_next_stream_id(FContext.FSession_http2);
       TNGHTTP2.GetInstance.nghttp2_priority_spec_init(@priority, 0, 255, 1);
+      TNGHTTP2.GetInstance.nghttp2_session_change_stream_priority(FContext.Session_http2, Self.FStreamID, @priority);
       FStreamId := TNGHTTP2.GetInstance.nghttp2_submit_request(FContext.FSession_http2, @priority, @headers[0], Length(headers), @FRequestProvider, Self);
-      {$IFDEF LOGGING}
-      OutputDebug(Format('New request = %d',[FStreamId]));
-      {$ENDIF}
     finally
       System.TMonitor.Exit(FContext);
     end;
@@ -1843,34 +1717,10 @@ begin
   if aClose then
     Self.FReqClosed.Value := True;
 
-  //NEW
   TNGHTTP2.GetInstance.nghttp2_priority_spec_init(@priority, 0, 255, 1);
   TNGHTTP2.GetInstance.nghttp2_session_change_stream_priority(FContext.Session_http2, Self.FStreamID, @priority);
 
   FRequestBuffer.Write(aData);
-  if not FContext.nghttp2_Send and not aClose then
-    Assert(False, 'Send failed');    //todo: better exception handling
-end;
-
-procedure TStreamRequest.SendRequestDataEx(const aData: TBytes; aClose: Boolean);
-var
-  vSubmitDataResult: Integer;
-begin
-  if Self.FReqClosed.Value then
-    Assert(False, 'Cannot send: request already closed');    //todo: better exception handling
-
-  FPendingRequest := not aClose;
-  if aClose then
-    Self.FReqClosed.Value := True;
-
-
-  FRequestProvider.source.ptr := Self;
-  FRequestProvider.read_callback := data_source_submit_data_read_callback;
-  vSubmitDataResult := TNGHTTP2.GetInstance.nghttp2_submit_data(FContext.Session_http2, 0, FStreamID, @FRequestProvider);
-  OutputDebug(Format('Actually gets here || Submit_data_result is %d', [vSubmitDataResult]));
-  if vSubmitDataResult = 0 then
-    FRequestBuffer.Write(aData);
-
   if not FContext.nghttp2_Send and not aClose then
     Assert(False, 'Send failed');    //todo: better exception handling
 end;
@@ -1917,7 +1767,7 @@ begin
   FPort := aPort;
   FSSL := aSSL;
 
-  FSessions := TObjectList<TSessionContext>.Create(True{owns});
+  FSessions := TObjectList<TSessionContext>.Create(True);
 end;
 
 { TBoolean }
