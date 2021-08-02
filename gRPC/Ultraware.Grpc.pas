@@ -2,8 +2,6 @@ unit Ultraware.Grpc;
 
 interface
 
-//{$DEFINE LOGGING}
-
 uses
   System.SysUtils, System.Types, System.Classes, Generics.Collections,
   Nghttp2, Grijjy.Http, Grijjy.Http2;
@@ -995,9 +993,6 @@ var
   impl: TBaseGrpcImplementationClass;
 begin
   aHandled := False;
-  {$IFDEF LOGGING}
-  Writeln(Format('>> %s: %d bytes', [aStream.RequestPath, aStream.RequestBuffer.Size]));
-  {$ENDIF}
 
   //more data for previous/running stream?
   if (aStream.RequestThread <> nil) and
@@ -1046,17 +1041,11 @@ begin
     procedure(const aData: TBytes; aIsStreamClosed: Boolean)
     var packet: TGrpcPacket;
     begin
-      {$IFDEF LOGGING}
-      Writeln(Format('<< %s: %d bytes', [aStream.RequestPath, Length(aData)]));
-      {$ENDIF}
       packet.Create(aData);
       aStream.SendResponseData(packet.Serialize, aIsStreamClosed);
     end,
     procedure(const aError: Exception)
     begin
-      {$IFDEF LOGGING}
-      Writeln(Format('E! %s', [aError.Message]));
-      {$ENDIF}
       aStream.SendErrorResponse(aError);
     end,
     thread) then

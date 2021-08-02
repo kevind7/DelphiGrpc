@@ -16,7 +16,6 @@ interface
 
 {$I Grijjy.inc}
 
-//{$DEFINE LOGGING}
 {$DEFINE HTTP2}
 
 uses
@@ -1133,9 +1132,6 @@ var
 begin
   stream := GetOrCreateStream(stream_id);
 
-  {$IFDEF LOGGING}
-  //grLog('on_data_chunk_recv_callback ' + stream_id.ToString, data, len);
-  {$ENDIF}
   if IsServerContext then
     stream.RequestBuffer.Write(data, len)
   else
@@ -1149,10 +1145,6 @@ var
   stream: TStreamRequest;
 begin
   stream := GetOrCreateStream(stream_id);
-
-  {$IFDEF LOGGING}
-  //grLog('on_stream_close_callback ' + stream_id.ToString);
-  {$ENDIF}
 
   if IsServerContext then
     stream.CloseRequest
@@ -1214,9 +1206,6 @@ var
   AName, AValue: String;
   stream_data: TStreamRequest;
 begin
-  {$IFDEF LOGGING}
-  //grLog('on_header_callback');
-  {$ENDIF}
   if frame.hd.&type = _NGHTTP2_HEADERS then
   begin
     AName := TEncoding.ASCII.GetString(BytesOf(name, namelen));
@@ -1225,9 +1214,6 @@ begin
     begin
       stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
       stream_data.ResponseHeaders.AddOrSet(AName, AValue);
-      {$IFDEF LOGGING}
-      //grLog(AName, AValue);
-      {$ENDIF}
     end
     else if (frame.headers.cat = NGHTTP2_HCAT_REQUEST) then
     begin
@@ -1643,9 +1629,6 @@ begin
     FRequestBuffer.Write(ARequest);
     Result := SendRequest;
   end;
-  {$IFDEF LOGGING}
-  //grLog('ResponseLength', Length(AResponse));
-  {$ENDIF}
 end;
 
 function TStreamRequest.SendRequest: Boolean;
@@ -1653,9 +1636,6 @@ var
   headers: TArray<nghttp2_nv>;
   priority: nghttp2_priority_spec;
 begin
-  {$IFDEF LOGGING}
-  //grLog('SendRequest Thread', GetCurrentThreadId);
-  {$ENDIF}
   Result := False;
   if (FContext <> nil) then
   begin
