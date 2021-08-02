@@ -323,9 +323,9 @@ var
   vPath: string;
 begin
   {$IFDEF WIN64}
-  vPath := 'D:\gRPCLib\Libraries\Win64\';
+  vPath := 'D:\gRPCLib\Libraries\Win64\'; //This should be the absolute path
   {$ELSE}
-  vPath := 'D:\gRPCLib\Libraries\Win32\';
+  vPath := 'D:\gRPCLib\Libraries\Win32\'; //This should be the absolute path
   {$ENDIF}
   vPath := vPath + NGHTTP2_LIB;
 
