@@ -268,7 +268,6 @@ type
 implementation
 
 uses
-  //USharedLibsHandler,
   System.Classes,
   {$IFDEF MSWINDOWS}
   Windows,
@@ -319,17 +318,8 @@ begin
 end;
 
 function TNGHTTP2.StartUp: Integer;
-var
-  vPath: string;
 begin
-  {$IFDEF WIN64}
-  vPath := 'D:\gRPCLib\Libraries\Win64\'; //This should be the absolute path
-  {$ELSE}
-  vPath := 'D:\gRPCLib\Libraries\Win32\'; //This should be the absolute path
-  {$ENDIF}
-  vPath := vPath + NGHTTP2_LIB;
-
-  fLibHandle := LoadLibraryEx(PWideChar(vPath), 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+  fLibHandle := LoadLibrary(PWideChar(NGHTTP2_LIB));
   if fLibHandle <> 0 then
   begin
     nghttp2_submit_settings := GetProcAddress(fLibHandle, 'nghttp2_submit_settings');
