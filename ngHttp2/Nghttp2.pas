@@ -349,9 +349,11 @@ begin
     nghttp2_session_want_write := GetProcAddress(fLibHandle, 'nghttp2_session_want_write');
     nghttp2_submit_rst_stream := GetProcAddress(fLibHandle, 'nghttp2_submit_rst_stream');
     nghttp2_submit_data := GetProcAddress(fLibHandle, 'nghttp2_submit_data');
+    {$IFNDEF WIN32}
     nghttp2_option_new := GetProcAddress(fLibHandle, 'nghttp2_option_new');
     nghttp2_option_del := GetProcAddress(fLibHandle, 'nghttp2_option_del');
     nghttp2_option_set_no_closed_streams := GetProcAddress(fLibHandle, 'nghttp2_option_set_no_closed_streams');
+    {$ENDIF}
   end;
 
   if (@nghttp2_submit_settings = nil) or
@@ -378,12 +380,14 @@ begin
     (@nghttp2_session_mem_recv = nil) or
     (@nghttp2_session_mem_send = nil) or
     (@nghttp2_session_want_read = nil) or
+    {$IFNDEF WIN32}
+    (@nghttp2_option_new = nil) or
+    (@nghttp2_option_del = nil) or
+    (@nghttp2_option_set_no_closed_streams = nil) or
+    {$ENDIF}
     (@nghttp2_session_want_write = nil) or
     (@nghttp2_submit_rst_stream = nil) or
-    (@nghttp2_submit_data = nil) or
-    (@nghttp2_option_set_no_closed_streams = nil) or
-    (@nghttp2_option_del = nil) or
-    (@nghttp2_option_new = nil) then
+    (@nghttp2_submit_data = nil) then
       Result := -1
     else
       Result := 0;

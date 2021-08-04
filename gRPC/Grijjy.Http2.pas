@@ -1004,8 +1004,10 @@ begin
   if error <> 0 then
     raise Exception.CreateFmt('Unable to setup ngHttp2 session (errorcode: %d)', [error]);
 
+  {$IFNDEF WIN32}
   if TNGHTTP2.GetInstance.nghttp2_option_new(FOptions_http2) = 0 then
     TNGHTTP2.GetInstance.nghttp2_option_set_no_closed_streams(FOptions_http2, 1);
+  {$ENDIF WIN32}
 
   //init settings
   settings.settings_id := NGHTTP2_SETTINGS_ENABLE_PUSH;
@@ -1039,7 +1041,9 @@ begin
   FConnectionTimeout.Free;
   FStreams.Free;
   FUnaryStreams.Free;
+  {$IFNDEF WIN32}
   TNGHTTP2.GetInstance.nghttp2_option_del(FOptions_http2);
+  {$ENDIF}
   TNGHTTP2.GetInstance.nghttp2_session_terminate_session(FSession_http2, NGHTTP2_NO_ERROR);
   TNGHTTP2.GetInstance.nghttp2_session_del(FSession_http2);
   Disconnect;
