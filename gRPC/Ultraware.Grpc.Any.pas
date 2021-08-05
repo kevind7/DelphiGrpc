@@ -15,7 +15,7 @@ type
     public
     [Serialize(1)] TypeName: string;
     [Serialize(2)] AType: T;
-    function Pack(pType: T): TBytes;
+    function Pack: TBytes;
     function Unpack(pBytes: TBytes): Boolean;
   end;
 
@@ -68,16 +68,13 @@ end;
 
 { TAny<T> }
 
-function TAny<T>.Pack(pType: T): TBytes;
+function TAny<T>.Pack: TBytes;
 begin
-  // Here since the pType will be serialized into TBytes
-  // We don't care that pType is still the owner of every TArray<> field
   TypeName := TProtoUtils.GetTypeProtoMessageName<T>();
 
   if TypeName = EmptyStr then
     Exit(nil);
 
-  AType := pType;
   try
     Result := TgoProtocolBuffer.Serialize(Self);
   except
