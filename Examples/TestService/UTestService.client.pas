@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils, System.Generics.Collections,
   Grijjy.ProtocolBuffers,
-  Ultraware.Grpc,
+  Ultraware.Grpc, Ultraware.Grpc.Any,
   UTestService.proto, UTestService.grpc;
 
 type
@@ -28,6 +28,7 @@ type
     procedure EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple; pCallback: TAsyncEmbeddedMessageSimpleCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageComplex(pEmbComplex: EmbeddedComplex; pCallback: TAsyncEmbeddedMessageComplexCallback; pOnTimeout: TProc<Integer> = nil);
     procedure ReturnAnyType(pInfoString: InfoString; pCallback: TAsyncReturnAnyTypeCallback; pOnTimeout: TProc<Integer>);
+    procedure SendAnyType(pAny: TBytes; pCallback: TAsyncSendAnyTypeCallback; pOnTimeout: TProc<Integer> = nil);
     procedure BeginStream(pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure BeginStreamEx(pStreamInfo: StreamInfo; pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure ClientStream(pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
@@ -206,6 +207,28 @@ begin
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pInfoString),
     '/testservice.TestService/ReturnAnyType', vCallback, nil, nil, 3);
 end;
+
+procedure TTestService.SendAnyType(pAny: TBytes;
+  pCallback: TAsyncSendAnyTypeCallback; pOnTimeout: TProc<Integer>);
+var
+  vCallback: TGrpcCallbackExA;
+begin
+  vCallback :=
+    procedure(const pPacket: TGrpcPacket; aIsStreamClosed: Boolean; pStreamID: Integer)
+    var
+      vInfoString: InfoString;
+    begin
+      if pPacket.Data <> nil then
+        if Length(pPacket.Data) <> 0 then
+        begin
+          TgoProtocolBuffer.Deserialize(vInfoString, pPacket.Data);
+          pCallback(vInfoString);
+        end;
+    end;
+  Client.DoUnaryRequestAsyncEx(pAny,
+    '/testservice.TestService/SendAnyType', vCallback, nil, nil, 3);
+end;
+
 
 procedure TTestService.EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple;
   pCallback: TAsyncEmbeddedMessageSimpleCallback; pOnTimeout: TProc<Integer>);

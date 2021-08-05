@@ -3,7 +3,9 @@ unit UTestService.grpc;
 interface
 
 uses
-  System.SysUtils, System.Generics.Collections, Ultraware.Grpc, UTestService.proto, Grijjy.ProtocolBuffers;
+  System.SysUtils, System.Generics.Collections,
+  Ultraware.Grpc, Ultraware.grpc.Any, Ultraware.Grpc.Proto.Utils,
+  UTestService.proto, Grijjy.ProtocolBuffers;
 
 type
   TAsyncAllTypesRequestCallback = procedure(pAllTypes: AllTypes) of object;
@@ -11,6 +13,7 @@ type
   TAsyncRepAllTypesRequestCallback = procedure(pRepAllTypes: RepAllTypes) of object;
   TAsyncEmbeddedMessageSimpleCallback = procedure(pEmbSimple: EmbeddedSimple) of object;
   TAsyncEmbeddedMessageComplexCallback = procedure(pEmbComplex: EmbeddedComplex) of object;
+  TAsyncSendAnyTypeCallback = procedure(pInfoString: InfoString) of object;
   TAsyncBeginStreamStreamDataCallback = procedure(pStreamData: StreamData) of object;
   TAsyncBeginStreamStreamDataCallbackEx = procedure(pStreamData: StreamData; pStreamID: Integer) of object;
   TAsyncReturnAnyTypeCallback = procedure(pAny: TBytes) of object;
@@ -64,6 +67,7 @@ type
     procedure EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple; pCallback: TAsyncEmbeddedMessageSimpleCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageComplex(pEmbComplex: EmbeddedComplex; pCallback: TAsyncEmbeddedMessageComplexCallback; pOnTimeout: TProc<Integer> = nil);
     procedure ReturnAnyType(pInfoString: InfoString; pCallback: TAsyncReturnAnyTypeCallback; pOnTimeout: TProc<Integer> = nil);
+    procedure SendAnyType(pAny: TBytes; pCallback: TAsyncSendAnyTypeCallback; pOnTimeout: TProc<Integer> = nil);
     procedure BeginStream(pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure BeginStreamEx(pStreamInfo: StreamInfo; pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure ClientStream(pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
