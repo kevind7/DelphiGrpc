@@ -59,15 +59,15 @@ type
     procedure CheckAllTypesAsync(pCallback: TAsyncAllTypesRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure OneSimpleAsync(pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure DoubleSimpleAsync(pSimpleData: Simple; pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer> = nil);
-    procedure SaveSimpleAsync(pSimpleData: Simple; pOnTimeout: TProc<Integer> = nil);
+    procedure SaveSimpleAsync(pSimpleData: Simple; pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>> = nil; pOnTimeout: TProc<Integer> = nil);
     procedure RepSimpleAsync(pRepAllTypes: RepAllTypes; pCallback: TAsyncRepAllTypesRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple; pCallback: TAsyncEmbeddedMessageSimpleCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageComplex(pEmbComplex: EmbeddedComplex; pCallback: TAsyncEmbeddedMessageComplexCallback; pOnTimeout: TProc<Integer> = nil);
     procedure ReturnAnyType(pInfoString: InfoString; pCallback: TAsyncReturnAnyTypeCallback; pOnTimeout: TProc<Integer> = nil);
     procedure BeginStream(pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure BeginStreamEx(pStreamInfo: StreamInfo; pCallback: TAsyncBeginStreamStreamDataCallbackEx);
-    procedure ClientStream(pOnStreamClose: TProc);
-    procedure ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback; pOnStreamClose: TProc);
+    procedure ClientStream(pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
+    procedure ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback; pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
     procedure DuplexStream(pCallback: TDuplexStreamDataCallback);
     function  BeginStreamsList: TList<IGrpcStream>;
     function  BeginStreamsExList: TList<IGrpcStream>;

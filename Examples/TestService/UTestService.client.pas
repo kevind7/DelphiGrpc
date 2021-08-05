@@ -23,15 +23,15 @@ type
     procedure CheckAllTypesAsync(pCallback: TAsyncAllTypesRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure OneSimpleAsync(pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure DoubleSimpleAsync(pSimpleData: Simple; pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer> = nil);
-    procedure SaveSimpleAsync(pSimpleData: Simple; pOnTimeout: TProc<Integer> = nil);
+    procedure SaveSimpleAsync(pSimpleData: Simple; pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>> = nil; pOnTimeout: TProc<Integer> = nil);
     procedure RepSimpleAsync(pRepAllTypes: RepAllTypes; pCallback: TAsyncRepAllTypesRequestCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple; pCallback: TAsyncEmbeddedMessageSimpleCallback; pOnTimeout: TProc<Integer> = nil);
     procedure EmbeddedMessageComplex(pEmbComplex: EmbeddedComplex; pCallback: TAsyncEmbeddedMessageComplexCallback; pOnTimeout: TProc<Integer> = nil);
     procedure ReturnAnyType(pInfoString: InfoString; pCallback: TAsyncReturnAnyTypeCallback; pOnTimeout: TProc<Integer>);
     procedure BeginStream(pCallback: TAsyncBeginStreamStreamDataCallbackEx);
     procedure BeginStreamEx(pStreamInfo: StreamInfo; pCallback: TAsyncBeginStreamStreamDataCallbackEx);
-    procedure ClientStream(pOnStreamClose: TProc);
-    procedure ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback; pOnStreamClose: TProc);
+    procedure ClientStream(pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
+    procedure ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback; pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
     procedure DuplexStream(pCallback: TDuplexStreamDataCallback);
     function  BeginStreamsList: TList<IGrpcStream>;
     function  BeginStreamsExList: TList<IGrpcStream>;
@@ -106,10 +106,11 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(nil,
-    '/testservice.TestService/CheckAllTypes', vCallback, nil, 3);
+    '/testservice.TestService/CheckAllTypes', vCallback, nil, nil, 3);
 end;
 
-procedure TTestService.OneSimpleAsync(pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer>);
+procedure TTestService.OneSimpleAsync(pCallback: TAsyncOneSimpleRequestCallback;
+  pOnTimeout: TProc<Integer>);
 var
   vCallback: TGrpcCallbackExA;
 begin
@@ -126,11 +127,12 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(nil,
-    '/testservice.TestService/OneSimple', vCallback, nil, 3);
+    '/testservice.TestService/OneSimple', vCallback, nil, nil, 3);
 end;
 
 procedure TTestService.DoubleSimpleAsync(pSimpleData: Simple;
-  pCallback: TAsyncOneSimpleRequestCallback; pOnTimeout: TProc<Integer>);
+  pCallback: TAsyncOneSimpleRequestCallback;
+  pOnTimeout: TProc<Integer>);
 var
   vCallback: TGrpcCallbackExA;
 begin
@@ -147,10 +149,12 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pSimpleData),
-    '/testservice.TestService/DoubleSimple', vCallback, pOnTimeout, 3);
+    '/testservice.TestService/DoubleSimple', vCallback, pOnTimeout, nil, 3);
 end;
 
-procedure TTestService.SaveSimpleAsync(pSimpleData: Simple; pOnTimeout: TProc<Integer>);
+procedure TTestService.SaveSimpleAsync(pSimpleData: Simple;
+  pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>;
+  pOnTimeout: TProc<Integer>);
 var
   vCallback: TGrpcCallbackExA;
 begin
@@ -159,7 +163,7 @@ begin
     begin
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pSimpleData),
-    '/testservice.TestService/SaveSimple', vCallback, nil, 3);
+    '/testservice.TestService/SaveSimple', vCallback, nil, pOnStreamClose, 3);
 end;
 
 procedure TTestService.RepSimpleAsync(pRepAllTypes: RepAllTypes;
@@ -180,7 +184,7 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pRepAllTypes),
-    '/testservice.TestService/RepSimple', vCallback, nil, 3);
+    '/testservice.TestService/RepSimple', vCallback, nil, nil, 3);
 end;
 
 procedure TTestService.ReturnAnyType(pInfoString: InfoString; pCallback: TAsyncReturnAnyTypeCallback; pOnTimeout: TProc<Integer>);
@@ -200,7 +204,7 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pInfoString),
-    '/testservice.TestService/ReturnAnyType', vCallback, nil, 3);
+    '/testservice.TestService/ReturnAnyType', vCallback, nil, nil, 3);
 end;
 
 procedure TTestService.EmbeddedMessageSimple(pEmbSimple: EmbeddedSimple;
@@ -221,7 +225,7 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pEmbSimple),
-    '/testservice.TestService/EmbeddedMessageSimple', vCallback, nil, 3);
+    '/testservice.TestService/EmbeddedMessageSimple', vCallback, nil, nil, 3);
 end;
 
 procedure TTestService.EmbeddedMessageComplex(pEmbComplex: EmbeddedComplex;
@@ -242,7 +246,7 @@ begin
         end;
     end;
   Client.DoUnaryRequestAsyncEx(TgoProtocolBuffer.Serialize(pEmbComplex),
-    '/testservice.TestService/EmbeddedMessageComplex', vCallback, nil, 3);
+    '/testservice.TestService/EmbeddedMessageComplex', vCallback, nil, nil, 3);
 end;
 
 procedure TTestService.BeginStream(
@@ -294,7 +298,8 @@ begin
     fBeginStreamsEx.Add(vGrpcStream);
 end;
 
-procedure TTestService.ClientStream(pOnStreamClose: TProc);
+procedure TTestService.ClientStream(pOnStreamClose:
+  TProc<TPair<string, string>, TPair<string, string>>);
 var
   vRequest: IGrpcStream;
 begin
@@ -305,7 +310,8 @@ begin
   fClientStreams.Add(TSendClientStream.Create(vRequest));
 end;
 
-procedure TTestService.ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback; pOnStreamClose: TProc);
+procedure TTestService.ClientStreamEx(pCallback: TAsyncClientStreamExDataCallback;
+  pOnStreamClose: TProc<TPair<string, string>, TPair<string, string>>);
 var
   vRequest: IGrpcStream;
   vCallback: TGrpcCallbackExA;

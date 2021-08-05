@@ -19,6 +19,7 @@ interface
 {$DEFINE HTTP2}
 
 uses
+  Dialogs, //REMOVE THIS LATER
   Vcl.ExtCtrls,
   System.Classes,
   System.SysUtils,
@@ -376,7 +377,7 @@ type
 
     FOnFrameReceived: TStreamCallback;
     FRemoveSelfFromContext: TStreamCleanup;
-    FOnStreamClose: TProc;
+    FOnStreamClose: TProc<TPair<string,string>, TPair<string,string>>;
     FOnTimeout: TProc<Integer>;
 
     FRequestThread: IRequestThread;
@@ -418,7 +419,7 @@ type
     property RequestThread: IRequestThread read FRequestThread write FRequestThread;
     property OnFrameReceived: TStreamCallback read FOnFrameReceived write FOnFrameReceived;
     property RemoveSelfFromContext: TStreamCleanup read FRemoveSelfFromContext write FRemoveSelfFromContext;
-    property OnStreamClose: TProc read FOnStreamClose write FOnStreamClose;
+    property OnStreamClose: TProc<TPair<string,string>, TPair<string,string>> read FOnStreamClose write FOnStreamClose;
     property OnTimeout: TProc<Integer> read FOnTimeout write FOnTimeout;
     property OnDestroy: TNotifyEvent read FOnDestroy write FOnDestroy;
     property TimeoutBegin: UInt64 read FTimeOutBegin write FTimeOutBegin;
@@ -1147,6 +1148,8 @@ function TSessionContext.nghttp2_on_stream_close_callback(session: pnghttp2_sess
   stream_id: int32; error_code: uint32; user_data: Pointer): Integer;
 var
   stream: TStreamRequest;
+  Header: TgoHttpHeader;
+  vGrpcStatus, vGrpcMessage: TPair<string, string>;
 begin
   stream := GetOrCreateStream(stream_id);
 
@@ -1160,7 +1163,21 @@ begin
     Result := OnFrameReceived(session, Self, stream);
 
   if Assigned(stream.OnStreamClose) then
-    stream.OnStreamClose();
+  begin
+    for Header in stream.ResponseHeaders.Headers do
+      if Header.Name = 'grpc-status' then
+      begin
+        vGrpcStatus.Key := Header.Name;
+        vGrpcStatus.Value := Header.Value;
+      end
+      else if Header.Name = 'grpc-message' then
+      begin
+        vGrpcMessage.Key := Header.Name;
+        vGrpcMessage.Value := Header.Value;
+      end;
+    stream.OnStreamClose(vGrpcStatus, vGrpcMessage);
+  end;
+
   if Assigned(stream.RemoveSelfFromContext) then
     stream.RemoveSelfFromContext(stream);
 
@@ -1180,14 +1197,18 @@ begin
   case frame.hd.&type of
     NGHTTP2_DATA,
     _NGHTTP2_HEADERS:
-    // Check that the client request has finished
+    // Checks that the client request has finished
     begin
       stream_data := TNGHTTP2.GetInstance.nghttp2_session_get_stream_user_data(session, frame.hd.stream_id);
       // For DATA and HEADERS frame, this callback may be called after on_stream_close_callback. Check that stream still alive. */
       if stream_data = nil then
-      begin
         Exit(0);
-      end;
+
+      // TODO -> Create a OnHeadersDone event on TStreamRequest
+      // if (frame.hd.&type = _NGHTTP2_HEADERS) and (frame.hd.flags = NGHTTP2_FLAG_END_HEADERS) then
+      //   if Assigned(stream_data.OnHeadersDone)
+      //     stream_data.OnHeadersDone;
+
       //Golang sometimes sends an EOF on a HEADER
       if (frame.hd.flags AND NGHTTP2_DATA_FLAG_EOF > 0) then
       begin

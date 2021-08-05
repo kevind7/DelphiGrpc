@@ -63,7 +63,7 @@ type
     function IsRequestClosed: Boolean;
     function GetStreamID: Integer;
 
-    procedure SetOnCloseCallback(pOnStreamClose: TProc);
+    procedure SetOnCloseCallback(pOnStreamClose: TProc<TPair<string, string>, TPair<string,string>>);
   end;
 
   TGrpcHttp2Stream = class(TInterfacedObject, IGrpcStream)
@@ -82,7 +82,7 @@ type
     function  IsRequestClosed: Boolean;
     function GetStreamID: Integer;
 
-    procedure SetOnCloseCallback(pOnStreamClose: TProc);
+    procedure SetOnCloseCallback(pOnStreamClose: TProc<TPair<string, string>, TPair<string,string>>);
   public
     constructor Create(aRequest: TStreamRequest);
     destructor  Destroy; override;
@@ -137,9 +137,14 @@ type
     function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
       const aReceiveCallback: TGrpcCallbackExA; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
     procedure DoUnaryRequestAsyncEx(const aSendData: TBytes; const aGrpcPath: string;
-      const aReceiveCallback: TGrpcCallbackExA; const aTimeoutCallback: TProc<Integer>; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
+      const aReceiveCallback: TGrpcCallbackExA;
+      const aTimeoutCallback: TProc<Integer>;
+      const aCloseCallback: TProc<TPair<string, string>, TPair<string, string>>;
+      const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
     procedure DoUnaryRequestAsyncExA(const aSendData: TBytes; const aGrpcPath: string;
-      const aReceiveCallback: TGrpcCallbackExA; const aTimeoutCallback: TProc<Integer>; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
+      const aReceiveCallback: TGrpcCallbackExA;
+      const aTimeoutCallback: TProc<Integer>;
+      const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
   end;
 
   TGrpcHttp2Client = class(TInterfacedObject, IGrpcClient)
@@ -164,9 +169,14 @@ type
     function DoUnaryRequestAsync(const aSendData: TBytes; const aGrpcPath: string;
       const aReceiveCallback: TGrpcCallbackExA; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV): IGrpcStream; overload;
     procedure DoUnaryRequestAsyncEx(const aSendData: TBytes; const aGrpcPath: string;
-      const aReceiveCallback: TGrpcCallbackExA; const aTimeoutCallback: TProc<Integer>; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
+      const aReceiveCallback: TGrpcCallbackExA;
+      const aTimeoutCallback: TProc<Integer>;
+      const aCloseCallback: TProc<TPair<string, string>, TPair<string, string>>;
+      const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
     procedure DoUnaryRequestAsyncExA(const aSendData: TBytes; const aGrpcPath: string;
-      const aReceiveCallback: TGrpcCallbackExA; const aTimeoutCallback: TProc<Integer>; const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
+      const aReceiveCallback: TGrpcCallbackExA;
+      const aTimeoutCallback: TProc<Integer>;
+      const TimeoutInSeconds: UInt64 = TIMEOUT_RECV);
   public
     procedure   AfterConstruction; override;
     constructor Create(const aHost: string; aPort: Integer; aSSL: Boolean = False; aConnectTimeout: Integer = TIMEOUT_CONNECT; aReceiveTimeout: Integer = TIMEOUT_RECV);
@@ -511,7 +521,7 @@ begin
 end;
 
 procedure TGrpcHttp2Stream.SetOnCloseCallback(
-  pOnStreamClose: TProc);
+  pOnStreamClose: TProc<TPair<string, string>, TPair<string,string>>);
 begin
   if Assigned(pOnStreamClose) then
     FRequest.OnStreamClose := pOnStreamClose;
@@ -713,6 +723,7 @@ end;
 procedure TGrpcHttp2Client.DoUnaryRequestAsyncEx(const aSendData: TBytes; const aGrpcPath: string;
   const aReceiveCallback: TGrpcCallbackExA;
   const aTimeoutCallback: TProc<Integer>;
+  const aCloseCallback: TProc<TPair<string, string>, TPair<string, string>>;
   const TimeoutInSeconds: UInt64);
 var
   packet: TGrpcPacket;
@@ -725,6 +736,7 @@ begin
   request.TimeoutEnd := TimeoutInSeconds;
   request.IsUnary := True;
   request.OnTimeout := aTimeoutCallback;
+  request.OnStreamClose := aCloseCallback;
 
   if Assigned(aReceiveCallback) then
   begin
