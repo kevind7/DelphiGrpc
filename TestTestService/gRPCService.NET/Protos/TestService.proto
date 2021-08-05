@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+option csharp_namespace = "gRPCService.NET";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/any.proto";
+
+package TestService;
+
+service TestService {
+  rpc CheckAllTypes (google.protobuf.Empty) returns (AllTypes);
+  rpc OneSimple (google.protobuf.Empty) returns (Simple);
+  rpc DoubleSimple (Simple) returns (Simple);
+  rpc SaveSimple (Simple) returns (google.protobuf.Empty);
+  rpc RepSimple (RepAllTypes) returns (RepAllTypes);
+  rpc EmbeddedMessageSimple (EmbeddedSimple) returns (EmbeddedSimple);
+  rpc EmbeddedMessageComplex (EmbeddedComplex) returns (EmbeddedComplex);
+  rpc ReturnAnyType (InfoString) returns (google.protobuf.Any);
+  rpc BeginStream (google.protobuf.Empty) returns (stream StreamData);
+  rpc BeginStreamEx (StreamInfo) returns (stream StreamData);
+  rpc ClientStream (stream StreamData) returns (google.protobuf.Empty);
+  rpc ClientStreamEx (stream StreamData) returns (StreamInfo);
+  rpc DuplexStream (stream StreamInfo) returns (stream StreamData);
+}
+
+enum EnumType {
+    One = 0;
+    Two = 1;
+	Three = 2;
+}
+
+message EmbeddedSimple {
+	string TypeName = 1;
+	Simple SimpleData = 2;
+	repeated StreamInfo StreamInfoArray = 3;
+}
+
+message EmbeddedComplex {
+	string ComplexInfo = 1;
+	ComplexStruct ComplexData = 2;
+}
+
+message Simple {
+	string Name = 1;
+	int32 ID = 2;
+	bytes Info = 3;
+}
+
+message ComplexStruct {
+	bytes RawData = 1;
+	string DataInfo = 2;
+	fixed32 DataID = 3;
+	Simple SimpleData = 4;
+}
+
+message RepAllTypes {
+	repeated double DoubleData = 1;
+	repeated float FloatData = 2;
+	repeated fixed32 UInt32Data = 3;
+	repeated fixed64 UInt64Data = 4;
+	repeated sfixed32 Int32Data = 5;
+	repeated sfixed64 Int64Data = 6;
+	repeated bool BoolData = 7;
+	repeated string UTF8StringData = 8;
+	repeated EnumType EnumData = 9;
+}
+
+message AllTypes {
+	double DoubleData = 1;
+	float FloatData = 2;
+//	fixed32 UInt32Data = 3;
+//	fixed64 UInt64Data = 4;
+//	sfixed32 Int32Data = 5;
+//	sfixed64 Int64Data = 6;	
+	int32 UInt32Data = 3;
+	int64 UInt64Data = 4;
+	sint32 Int32Data = 5;
+	sint64 Int64Data = 6;
+	bool BoolData = 7;
+	string UTF8StringData = 8;
+	bytes ArrayOfByteData = 9;
+	EnumType EnumData = 10;
+}
+
+message StreamInfo {
+	string Info = 1;
+}
+
+message InfoString {
+	string Info = 1;
+}
+
+message StreamData {
+	bytes Data = 1;
+	sfixed32 DataType = 2;
+	string ExtraInfo = 3;
+}

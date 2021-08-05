@@ -1,0 +1,4 @@
+obj\Debug\net5.0\Protos/TestService.cs \
+obj\Debug\net5.0\Protos/TestServiceGrpc.cs: C:/Users/Claudio/.nuget/packages/grpc.tools/2.38.0-pre1/build/native/include/google/protobuf/empty.proto\
+ C:/Users/Claudio/.nuget/packages/grpc.tools/2.38.0-pre1/build/native/include/google/protobuf/any.proto\
+ Protos/TestService.proto

@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2021/08/04 08:56:44.000.579,=D:\gRPCLib\TestTestService\Unit1.pas</Transaction>
+    <Transaction>2021/08/04 08:58:45.000.618,D:\gRPCLib\TestTestService\Unit1.pas=D:\gRPCLib\TestTestService\TestUTestService.client.pas</Transaction>
+  </Transactions>
+</BorlandProject>

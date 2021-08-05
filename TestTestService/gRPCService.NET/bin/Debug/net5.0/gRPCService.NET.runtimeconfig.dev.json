@@ -1,0 +1,9 @@
+{
+  "runtimeOptions": {
+    "additionalProbingPaths": [
+      "C:\\Users\\Claudio\\.dotnet\\store\\|arch|\\|tfm|",
+      "C:\\Users\\Claudio\\.nuget\\packages",
+      "D:\\Program Files (x86)\\Progress\\ToolboxNuGetPackages"
+    ]
+  }
+}
