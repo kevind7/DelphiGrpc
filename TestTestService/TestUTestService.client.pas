@@ -10,6 +10,14 @@ uses
   Ultraware.grpc, Ultraware.grpc.Proto.Utils, Ultraware.grpc.Any;
 
 type
+  TServerUtil = class
+    class var FStartUpInfo: TStartUpInfo;
+    class var FProcess: TProcessInformation;
+
+    class procedure StartServer;
+    class procedure StopServer;
+  end;
+
   TestUnitTestServiceClient = class(TTestCase)
   strict private
     FAllTypes: AllTypes;
@@ -120,7 +128,31 @@ uses
 
 const
   c_Localhost: string = '127.0.0.1';
-  c_Port: Integer = 5000;
+  c_Port: UInt16 = 5000;
+
+function GetDownTwoLevels(const pString: string): string;
+var
+  vCount: Integer;
+  vDelimiterIndex, vDelimiterCount, vDelimNew: Integer;
+begin
+  vDelimiterIndex := 0;
+  vDelimiterCount := 0;
+  vDelimNew := 0;
+  for vCount := 1 to pString.Length do
+    if (pString[vCount] = '\') or (pString[vCount] = '/') then
+      Inc(vDelimiterCount);
+  for vCount := 1 to pString.Length do
+    if (pString[vCount] = '\') or (pString[vCount] = '/') then
+    begin
+      Inc(vDelimNew);
+      if vDelimNew = (vDelimiterCount - 2) then
+      begin
+        vDelimiterIndex := vCount;
+        Break;
+      end;
+    end;
+  Result := Copy(pString, 0, vDelimiterIndex);
+end;
 
 function GenerateRandomStreamData: StreamData;
 var
@@ -289,6 +321,43 @@ begin
     else if (vComp.Compare(A1[vCount], A2[vCount]).ToBoolean) then
         Exit(False);
   Exit(True);
+end;
+
+{ TServerUtil }
+
+class procedure TServerUtil.StartServer;
+var
+  vCmd, vAppPath: string;
+  vLength: Integer;
+  vBuffer: TBytes;
+begin
+  vAppPath := ExtractFilePath(ParamStr(0));
+  vAppPath := GetDownTwoLevels(vAppPath);
+  vAppPath := vAppPath + 'gRPCService.NET\bin\Debug\net5.0\';
+
+  vCmd := vAppPath + 'gRPCService.NET.exe' + ' ' + c_Port.ToString;
+  vLength := (Length(vCmd)+1)*sizeof(Char);
+  SetLength(vBuffer, vLength);
+  Move(vCmd[1], vBuffer[0], vLength);
+
+  FStartUpInfo.cb:= 2048;
+  FStartUpInfo.lpReserved := nil;
+  FStartUpInfo.lpDesktop := nil;
+  FStartUpInfo.lpTitle := nil;
+  FStartUpInfo.dwFlags := STARTF_USESHOWWINDOW;
+  FStartUpInfo.wShowWindow := SW_SHOWNORMAL;//SW_Hide; //para não aparecer na tela!
+  FStartUpInfo.cbReserved2 := 0;
+  FStartUpInfo.lpReserved2 := nil;
+
+  CreateProcess(nil, PChar(vCmd), nil, nil, False,
+    0, nil, PChar(vAppPath),
+    FStartUpInfo, FProcess);
+end;
+
+class procedure TServerUtil.StopServer;
+begin
+  if FProcess.dwProcessId <> 0 then
+    TerminateProcess(FProcess.hProcess, 0);
 end;
 
 { TestUnitTestServiceClient }
@@ -787,5 +856,9 @@ end;
 
 initialization
   RegisterTest(TestUnitTestServiceClient.Suite);
+  TServerUtil.StartServer;
+
+finalization
+  TServerUtil.StopServer;
 
 end.
