@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "D:\\TestProjects\\gRPCTest\\gRPCService.NET\\gRPCService.NET.csproj": {}
+    "D:\\gRPCLib\\TestTestService\\gRPCService.NET\\gRPCService.NET.csproj": {}
   },
   "projects": {
-    "D:\\TestProjects\\gRPCTest\\gRPCService.NET\\gRPCService.NET.csproj": {
+    "D:\\gRPCLib\\TestTestService\\gRPCService.NET\\gRPCService.NET.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "D:\\TestProjects\\gRPCTest\\gRPCService.NET\\gRPCService.NET.csproj",
+        "projectUniqueName": "D:\\gRPCLib\\TestTestService\\gRPCService.NET\\gRPCService.NET.csproj",
         "projectName": "gRPCService.NET",
-        "projectPath": "D:\\TestProjects\\gRPCTest\\gRPCService.NET\\gRPCService.NET.csproj",
+        "projectPath": "D:\\gRPCLib\\TestTestService\\gRPCService.NET\\gRPCService.NET.csproj",
         "packagesPath": "C:\\Users\\Claudio\\.nuget\\packages\\",
-        "outputPath": "D:\\TestProjects\\gRPCTest\\gRPCService.NET\\obj\\",
+        "outputPath": "D:\\gRPCLib\\TestTestService\\gRPCService.NET\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "D:\\Program Files (x86)\\Progress\\ToolboxNuGetPackages"
